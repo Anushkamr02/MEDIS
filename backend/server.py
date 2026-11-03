@@ -486,7 +486,7 @@ async def patient_record_for_chat(supa, patient_id):
         "scheduled_at": f"gte.{date.today().isoformat()}", "order": "scheduled_at.asc", "limit": "5"})
     documents = await supa.select("medical_reports", {
         "select": "file_name,category,report_date,review_status", "patient_id": f"eq.{patient_id}",
-        "order": "created_at.desc", "limit": "20"})
+        "order": "uploaded_at.desc", "limit": "20"})
     check = await latest_shared_assessment(supa, patient_id)
     heart_check = None
     if check:
@@ -497,13 +497,20 @@ async def patient_record_for_chat(supa, patient_id):
             "trends": {k: {"unit": m.get("unit"), "first": m["points"][0]["value"], "first_date": m["points"][0]["date"],
                            "latest": m["points"][-1]["value"], "latest_date": m["points"][-1]["date"],
                            "direction": m.get("direction")}
-                       for k, m in (report.get("metric_trajectories") or {}).items() if m.get("count")},
+                       for k, m in (report.get("metric_trajectories") or {}).items() if m.get("count") and m.get("points")},
             "ten_year_risk": ({"percent": pce.get("risk_percent"), "category": pce.get("category")}
                               if pce.get("status") == "CALCULATED" else None),
         })
 
     return {
         "today": date.today().isoformat(),
+        "retrieval_scope": {
+            "shared_visits": "Visits shared with this patient and returned by Supabase; unshared visits are excluded.",
+            "prescriptions": "Up to 10 most recently issued prescriptions; not a complete medication history.",
+            "upcoming_appointments": "Up to 5 appointments from today onward; check each status before describing it as upcoming.",
+            "uploaded_documents": "Up to 20 most recently uploaded files, metadata only; file contents are not retrieved.",
+            "heart_health_check": "Latest assessment shared with the patient, if available.",
+        },
         "patient": _without_empty({
             "name": profile.get("full_name"), "patient_id": profile.get("display_id"),
             "gender": profile.get("gender"), "age": age_from_dob(profile.get("date_of_birth")),
@@ -546,11 +553,13 @@ async def ai_chat(body: ChatRequest, ctx=Depends(current_user)):
         history.pop(0)  # the conversation sent to the API must start with a user turn
 
     record = await patient_record_for_chat(supa, user["id"])
-    system = llm.CHAT_SYSTEM + "\n\nPatient record (JSON):\n" + json.dumps(record, sort_keys=True, default=str)
+    context, source_catalog, schema = llm.chat_context(record)
+    system = llm.CHAT_SYSTEM + "\n\nPatient record (JSON):\n" + json.dumps(context, sort_keys=True, default=str)
     messages = [{"role": m["role"], "content": m["content"]} for m in history] + [{"role": "user", "content": message}]
 
     is_emergency = bool(llm.EMERGENCY.search(message))
-    answer, _ = await llm.generate_json(system, messages, llm.CHAT_SCHEMA, effort="low")
+    generated, _ = await llm.generate_json(system, messages, schema, effort="low")
+    answer = llm.validate_chat_answer(generated, source_catalog)
 
     question = await supa.insert("chat_messages", {"patient_id": user["id"], "role": "user", "content": message,
                                                    "is_emergency": is_emergency})

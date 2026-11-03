@@ -19,6 +19,7 @@ import {
 import { AIBadge } from './medis';
 
 const SUGGESTIONS = [
+  'Summarize my health records',
   'Explain my latest results',
   'What are my current medicines for?',
   'When is my next appointment?',
@@ -128,7 +129,7 @@ export default function PatientChat({ open, onOpenChange }) {
             <SheetTitle className="flex items-center gap-2 text-base">
               Ask MEDIS <AIBadge />
             </SheetTitle>
-            <SheetDescription className="text-xs">AI health assistant</SheetDescription>
+            <SheetDescription className="text-xs">Answers from your available health records</SheetDescription>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -149,8 +150,9 @@ export default function PatientChat({ open, onOpenChange }) {
         </header>
         {about && (
           <p className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-            This assistant uses an AI model (Google Gemini) over your own record: only visits your doctor shared, your
-            prescriptions, medicines, appointments and documents. It does not diagnose or change treatment.
+            Ask MEDIS uses your available profile, shared visits, medicines, recent prescriptions, appointments and shared
+            heart check to answer questions with Google Gemini. Uploaded files are listed by name and status; their contents
+            are not read here. It does not diagnose or change treatment.
           </p>
         )}
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
@@ -158,13 +160,14 @@ export default function PatientChat({ open, onOpenChange }) {
           {loaded && messages.length === 0 && (
             <div className="space-y-3">
               <p className="rounded-xl bg-muted p-3 text-sm">
-                I can explain your shared reports, medicines and appointments in simple words. I can't diagnose or change
-                your treatment.
+                Ask me to summarize your health records or explain your shared results, medicines and appointments.
+                I'll tell you when information is missing from the records I can see.
               </p>
               <div className="flex flex-wrap gap-2">
                 {SUGGESTIONS.map((s) => (
                   <button
                     key={s}
+                    disabled={sending}
                     onClick={() => send(s)}
                     className="rounded-full border border-primary/30 bg-primary-soft px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
                   >

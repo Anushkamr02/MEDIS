@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, ChevronDown, HeartPulse, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Activity, AlertTriangle, ChevronDown, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { aiRequest } from '../../lib/aiClient';
 import { formatDate, formatDateTime } from '../../lib/format';
@@ -7,7 +7,6 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { AIBadge, AIDisclaimer, EmptyState, PriorityPill, ServiceUnavailable, Spinner } from '../medis';
 import { METRIC_INFO, TrendCharts } from './TrendChart';
-import PceForm from './PceForm';
 import EcgResult from './EcgResult';
 import AiSummary from './AiSummary';
 import DigitalEcgUpload from './DigitalEcgUpload';
@@ -69,19 +68,18 @@ function Flags({ flags, chip }) {
 
 /**
  * Longitudinal CAD screening from the teammate's engine (via the AI
- * service): review priority, AI summary, trend graphs, findings, optional
- * legacy PCE and recent ECG analyses. Shown on the patient profile and,
+ * service): review priority, AI summary, trend graphs, findings and
+ * recent ECG analyses. Shown on the patient profile and,
  * compact, on the consultation page, where getDraftValues lets the doctor
  * preview how the unsaved visit changes the trend (previews are not saved).
  */
-export default function AiInsights({ patientId, patientAge, consultationId, getDraftValues, compact = false, onOpenVisit }) {
+export default function AiInsights({ patientId, consultationId, getDraftValues, compact = false, onOpenVisit }) {
   const [assessment, setAssessment] = useState(null); // cad_assessments row (+ preview flag)
   const [ecgRows, setEcgRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [full, setFull] = useState(!compact);
-  const [pceOpen, setPceOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!patientId) return;
@@ -100,7 +98,7 @@ export default function AiInsights({ patientId, patientAge, consultationId, getD
     load();
   }, [load]);
 
-  async function run(pceInputs) {
+  async function run() {
     setError('');
     setRunning(true);
     const draft = getDraftValues?.() ?? null;
@@ -109,7 +107,6 @@ export default function AiInsights({ patientId, patientAge, consultationId, getD
         consultation_id: consultationId ?? null,
         draft_values: draft,
         save: !draft,
-        pce_inputs: pceInputs ?? null,
       },
     });
     setRunning(false);
@@ -124,24 +121,14 @@ export default function AiInsights({ patientId, patientAge, consultationId, getD
       preview: !!draft,
       ai_summary: null,
     });
-    if (pceInputs) setPceOpen(false);
   }
 
   const report = assessment?.report;
   const trajectories = report?.metric_trajectories ?? {};
-  const pce = report?.absolute_risk;
   const hospitals = new Set(
     Object.values(trajectories).flatMap((m) => (m.points ?? []).flatMap((p) => (p.evidence ?? []).map((e) => e.hospital).filter(Boolean)))
   ).size;
   const latestEcg = ecgRows[0];
-
-  const pceDefaults = {
-    age: patientAge ?? '',
-    total_cholesterol: trajectories.total_cholesterol?.latest ?? '',
-    hdl_cholesterol: trajectories.hdl_cholesterol?.latest ?? '',
-    systolic_bp: trajectories.systolic_bp?.latest ?? '',
-    snapshot_date: trajectories.total_cholesterol?.points?.at(-1)?.date ?? '',
-  };
 
   const chip = (id) => (
     <button
@@ -270,31 +257,7 @@ export default function AiInsights({ patientId, patientAge, consultationId, getD
         )}
 
         {(full || compact || !report) && (
-          <div className={cn('grid gap-4', !compact && 'lg:grid-cols-2')}>
-            <div className="rounded-lg border p-3">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="text-sm font-semibold">10-year ASCVD risk (Pooled Cohort Equations, 2013)</h3>
-                <Button size="sm" variant="outline" onClick={() => setPceOpen(true)} disabled={running}>
-                  <HeartPulse className="h-3.5 w-3.5" />
-                  {pce?.status === 'CALCULATED' ? 'Recalculate' : 'Calculate'}
-                </Button>
-              </div>
-              {pce?.status === 'CALCULATED' ? (
-                <div className="mt-2">
-                  <p className="font-display text-3xl font-bold">{pce.risk_percent}%</p>
-                  <p className="text-sm font-medium">{pce.category}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Inputs confirmed by the doctor · values from {formatDate(pce.inputs?.snapshot_date)} · Legacy 2013 equation; not calibrated for Indian
-                    populations.
-                  </p>
-                </div>
-              ) : pce && pce.status !== 'NOT_CALCULATED' ? (
-                <p className="mt-2 rounded-md bg-muted px-3 py-2 text-sm font-medium">{pce.reason}</p>
-              ) : (
-                <p className="mt-2 text-sm text-muted-foreground">Not calculated. Each input must be confirmed by the doctor.</p>
-              )}
-              <PceForm open={pceOpen} onOpenChange={setPceOpen} defaults={pceDefaults} running={running} onSubmit={run} />
-            </div>
+          <div>
             <div className="space-y-3 rounded-lg border p-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold">
                 <Activity className="h-4 w-4 text-ai" />
