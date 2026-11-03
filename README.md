@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # MEDIS — Medical Evaluation & Diagnostic Intelligence System
 
 MEDIS is a multi-hospital electronic health record with digital consultations and AI-assisted, longitudinal screening for coronary artery disease (CAD).
@@ -151,3 +152,7 @@ python -m unittest test_longitudinal_engine test_visit_patterns
 - [docs/INTEGRATION_PLAN.md](docs/INTEGRATION_PLAN.md): how the AI engine was integrated, endpoints and migrations.
 - [docs/UI_FEATURES_SPEC.md](docs/UI_FEATURES_SPEC.md): every screen, button and state.
 - [backend/README.md](backend/README.md): engine internals, algorithms and model details.
+=======
+# MEDIS
+MEDIS is an AI-powered platform for Coronary Artery Disease (CAD) screening. It integrates patient records, ECG analysis, medical report extraction, digital consultations, prescriptions, and long-term health tracking to help doctors assess cardiovascular risk and make informed clinical decisions.
+>>>>>>> origin/main
