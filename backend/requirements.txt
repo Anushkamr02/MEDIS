@@ -1,0 +1,30 @@
+# MEDIS AI service (server.py + the teammate's medis package).
+# Derived from requirements-bootstrap.txt; dropped packages only used by their own
+# gateway (python-multipart is still needed for uploads). Python 3.11-3.13.
+fastapi
+uvicorn
+python-multipart
+httpx
+google-genai
+python-dotenv
+pydantic>=2,<3
+SQLAlchemy
+PyJWT
+email-validator
+reportlab
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+joblib
+tensorflow
+wfdb
+opencv-python
+Pillow
+pillow-heif
+pdfplumber
+pypdfium2
+pytesseract
+pdf2image
+# Also install the Tesseract executable (and Poppler for scanned PDFs) for OCR.

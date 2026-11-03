@@ -1,0 +1,28 @@
+# Secrets: never commit these (use the .env.example templates)
+.env
+.env.*
+!.env.example
+
+# Dependencies
+.venv/
+venv/
+node_modules/
+
+# Build output
+frontend/dist/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Created at runtime by the medis package
+backend/data/
+backend/outputs/
+backend/logs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

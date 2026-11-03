@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MEDIS · Connected care</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="MEDIS home"
+        ><span class="brand-icon">+</span> MEDIS</a
+      ><span class="tagline">One patient. One connected history.</span
+      ><a href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+    </header>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <main id="auth-view" class="auth-layout">
+      <section class="welcome">
+        <span class="eyebrow">CONNECTED CARE PLATFORM</span>
+        <h1>The whole history.<br />A clearer next step.</h1>
+        <p>
+          Bring consultations, prescriptions and clinical trends together across
+          hospitals.
+        </p>
+        <div class="welcome-grid">
+          <div>
+            <b>01</b>
+            <h3>One lifetime ID</h3>
+            <p>A continuous patient record.</p>
+          </div>
+          <div>
+            <b>02</b>
+            <h3>Care in context</h3>
+            <p>See how findings change over time.</p>
+          </div>
+          <div>
+            <b>03</b>
+            <h3>Evidence at hand</h3>
+            <p>Review the records behind each flag.</p>
+          </div>
+        </div>
+        <p class="small">
+          Clinical decision support. Findings require clinician review.
+        </p>
+      </section>
+      <section class="card auth-card">
+        <span class="eyebrow">YOUR WORKSPACE</span>
+        <h2 id="auth-title">Welcome back</h2>
+        <label
+          >Portal<select id="role">
+            <option value="doctor">Doctor</option>
+            <option value="patient">Patient</option>
+          </select></label
+        >
+        <div class="segmented">
+          <button id="login-mode" class="selected" type="button">Sign in</button
+          ><button id="register-mode" type="button">Register</button>
+        </div>
+        <form id="auth-form">
+          <div id="auth-fields" class="form-grid"></div>
+          <button class="primary full" type="submit" id="auth-submit">
+            Sign in
+          </button>
+        </form>
+        <p class="small">
+          Use your MEDIS ID and password. Registration creates a new permanent
+          ID.
+        </p>
+      </section>
+    </main>
+    <div id="workspace" class="workspace" hidden>
+      <aside>
+        <div class="account">
+          <span class="eyebrow" id="account-role"></span
+          ><strong id="account-name"></strong><code id="account-id"></code>
+        </div>
+        <nav id="navigation" aria-label="Workspace"></nav>
+        <button id="logout" class="secondary">Sign out</button>
+        <p class="small">MEDIS · Clinical prototype</p>
+      </aside>
+      <main class="content">
+        <div class="page-heading">
+          <div>
+            <span class="eyebrow">PATIENT WORKSPACE</span>
+            <h1 id="page-title">Patient record</h1>
+          </div>
+          <span class="pill">Connected timeline</span>
+        </div>
+        <section class="card patient-context">
+          <form id="patient-search" class="inline">
+            <label
+              >Patient MEDIS ID<input
+                name="patient_id"
+                placeholder="MEDIS-P-2026-00001"
+                required /></label
+            ><button class="primary" type="submit">Open record</button>
+          </form>
+          <div id="patient-summary" class="muted">
+            Open a patient record to begin.
+          </div>
+        </section>
+        <section id="record-panel" class="panel">
+          <div class="section-heading">
+            <h2>Visit timeline</h2>
+            <button id="history-download" class="secondary" type="button">
+              Download history PDF
+            </button>
+          </div>
+          <div id="timeline" class="empty">No patient selected.</div>
+        </section>
+        <section id="consultation-panel" class="panel" hidden>
+          <section class="card">
+            <h2>Digital consultation</h2>
+            <form id="start-visit" class="inline">
+              <label
+                >Hospital<input
+                  name="hospital_name"
+                  required
+                  placeholder="Hospital name" /></label
+              ><label
+                >Visit type<select name="visit_type">
+                  <option>Cardiology Consultation</option>
+                  <option>Follow-up</option>
+                  <option>Routine</option>
+                  <option>Emergency</option>
+                </select></label
+              ><button class="primary">Start visit</button>
+            </form>
+            <label class="visit-picker"
+              >Active visit<select id="active-visit">
+                <option value="">Select a visit</option>
+              </select></label
+            >
+          </section>
+          <section class="card">
+            <h2>Symptoms</h2>
+            <form id="symptoms-form">
+              <div id="symptom-fields" class="form-grid"></div>
+              <button class="primary">Save symptoms</button>
+            </form>
+          </section>
+          <section class="card">
+            <h2>Vitals & laboratory measurements</h2>
+            <form id="measurements-form">
+              <div id="measurement-fields" class="form-grid"></div>
+              <button class="primary">Save measurements</button>
+            </form>
+          </section>
+          <section class="card">
+            <h2>Clinical notes</h2>
+            <form id="notes-form">
+              <div id="note-fields" class="form-grid"></div>
+              <button class="primary">Save notes</button>
+            </form>
+          </section>
+        </section>
+        <section id="prescriptions-panel" class="panel" hidden>
+          <section class="card" id="prescription-editor">
+            <h2>Create prescription</h2>
+            <p class="small">Select the consultation's active visit first.</p>
+            <form id="prescription-form">
+              <div id="prescription-fields" class="form-grid"></div>
+              <div id="medicine-items"></div>
+              <button id="add-medicine" type="button" class="secondary">
+                + Add medicine</button
+              ><button class="primary" type="submit">
+                Create prescription PDF
+              </button>
+            </form>
+          </section>
+          <h2>Prescription history</h2>
+          <div id="prescriptions" class="empty">No patient selected.</div>
+        </section>
+        <section id="patterns-panel" class="panel" hidden>
+          <div class="section-heading">
+            <h2>Longitudinal assessment</h2>
+            <button id="refresh-patterns" class="secondary">
+              Refresh assessment
+            </button>
+          </div>
+          <div id="assessment" class="empty">
+            Open a patient record to view trends.
+          </div>
+          <details id="legacy-risk-editor" class="card" hidden>
+            <summary>
+              Optional legacy PCE comparison — clinician-confirmed inputs
+            </summary>
+            <p>
+              PREVENT-ASCVD is preferred by the 2026 guideline and is not yet
+              implemented here. This older PCE estimate covers heart attack,
+              coronary death and stroke. It is separate from progression and
+              cannot assess acute symptoms.
+            </p>
+            <p>
+              Confirm one recent clinical snapshot. Do not substitute a cohort
+              for an unsupported population. Inputs are used for this
+              calculation only; refreshing clears the estimate.
+            </p>
+            <form id="risk-form">
+              <div id="risk-fields" class="form-grid"></div>
+              <button type="submit">Calculate legacy comparison</button>
+            </form>
+          </details>
+        </section>
+        <section id="documents-panel" class="panel" hidden>
+          <section class="card">
+            <h2>Upload a medical document</h2>
+            <form id="upload-form">
+              <div class="form-grid">
+                <label
+                  >Category<select name="category">
+                    <option>Blood Report</option>
+                    <option>Prescription</option>
+                    <option>ECG</option>
+                    <option>Discharge Summary</option>
+                    <option>Other</option>
+                  </select></label
+                ><label
+                  >File<input
+                    type="file"
+                    name="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    required /></label
+                ><label>Notes<textarea name="notes"></textarea></label>
+              </div>
+              <button class="primary">Upload document</button>
+            </form>
+            <p class="small">
+              PDF, PNG or JPEG. Doctor uploads attach to the active visit when
+              selected.
+            </p>
+          </section>
+          <div id="documents"></div>
+        </section>
+        <section id="ecg-panel" class="panel" hidden>
+          <section class="card">
+            <h2>12-lead ECG analysis</h2>
+            <p>
+              Upload a printout or a digital recording. For WFDB, select the
+              header and all companion signal files together.
+            </p>
+            <form id="ecg-form">
+              <label
+                >ECG files<input
+                  name="files"
+                  type="file"
+                  multiple
+                  accept=".pdf,.png,.jpg,.jpeg,.hea,.dat,.mat,.csv,.npy"
+                  required /></label
+              ><button class="primary">Analyze ECG</button>
+            </form>
+            <p class="small">
+              Analysis preview only; use Documents to attach a report to the
+              patient record. Printout classification guardrails remain active.
+            </p>
+          </section>
+          <div id="ecg-result"></div>
+        </section>
+        <section id="audit-panel" class="panel" hidden>
+          <div class="section-heading">
+            <h2>Audit activity</h2>
+            <button id="refresh-audit" class="secondary">Refresh</button>
+          </div>
+          <div id="audit"></div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

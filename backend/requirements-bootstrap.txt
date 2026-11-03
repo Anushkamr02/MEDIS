@@ -1,0 +1,28 @@
+# Bootstrap dependencies; not a validated/pinned environment lock.
+# Python 3.13.3 was used locally. Verify compatible wheels on the target platform.
+fastapi
+uvicorn
+SQLAlchemy
+pydantic>=2,<3
+PyJWT
+python-multipart
+email-validator
+reportlab
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+joblib
+tensorflow
+wfdb
+opencv-python
+Pillow
+pdfplumber
+pypdfium2
+pytesseract
+pdf2image
+httpx
+# Optional training/explanation: shap, xgboost
+# PostgreSQL with postgresql+psycopg URL: psycopg[binary]
+# Install Tesseract/Poppler executables separately when their OCR/PDF paths are used.
