@@ -164,7 +164,15 @@ export default function DocumentUpload({
     };
     if (consultationId) row.consultation_id = consultationId;
 
-    const { error: insertError } = await supabase.from('medical_reports').insert(row);
+    let { error: insertError } = await supabase.from('medical_reports').insert(row);
+    // File size is optional metadata added in v8. A schema-cache rejection
+    // happens before insertion, so retrying this specific error is safe.
+    if (insertError?.code === 'PGRST204'
+      && insertError.message?.includes("'file_size_bytes'")
+      && insertError.message?.includes("'medical_reports'")) {
+      const { file_size_bytes, ...legacyRow } = row;
+      ({ error: insertError } = await supabase.from('medical_reports').insert(legacyRow));
+    }
 
     setUploading(false);
 
