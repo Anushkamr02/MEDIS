@@ -81,10 +81,35 @@ async def require_patient_access(supa, patient_id):
     return rows[0]
 
 
+# Which recorded access event each service action counts as. The patient's
+# access history lists these names; the exact action stays in the metadata.
+ACCESS_EVENTS = {
+    "ai_longitudinal_assessment": "ran_ai_analysis",
+    "ai_ecg_analysis": "ran_ai_analysis",
+    "ai_report_extraction": "ran_ai_analysis",
+    "ai_summary": "ran_ai_analysis",
+    "history_pdf_export": "generated_history_pdf",
+    "prescription_pdf_export": "downloaded_document",
+}
+
+
 async def audit(supa, user, action, target_id, metadata):
+    """Records that this caller accessed this patient's record.
+
+    Goes through log_patient_access() (migration v8) rather than inserting
+    into audit_logs: the database stamps the time, takes the actor from the
+    caller's own token, and re-checks that the caller really has access to
+    this patient before writing anything. The patient then sees the event
+    in their access history.
+    """
+    if not target_id:
+        return
     try:
-        await supa.insert("audit_logs", {"user_id": user["id"], "action": action, "target_id": target_id,
-                                         "target_type": "patient", "metadata": metadata})
+        await supa.rpc("log_patient_access", {
+            "p_patient_id": target_id,
+            "p_action": ACCESS_EVENTS.get(action, "ran_ai_analysis"),
+            "p_metadata": {"event": action, **(metadata or {})},
+        })
     except HTTPException:
         pass  # an audit failure must not hide the clinical result
 
@@ -338,6 +363,8 @@ async def prescription_pdf(prescription_id: str, ctx=Depends(current_user)):
         path = Path(folder) / "prescription.pdf"
         await run_in_threadpool(generate_prescription_pdf, data, str(path))
         content = path.read_bytes()
+    await audit(supa, user, "prescription_pdf_export", rx["patient_id"],
+                {"prescription_id": prescription_id, "visit_id": visit.get("visit_id")})
     filename = f"{data['prescription_id']}.pdf"
     return Response(content, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})

@@ -16,6 +16,10 @@ import Drafts from './pages/doctor/Drafts';
 import DoctorProfile from './pages/doctor/DoctorProfile';
 import MyProfile from './pages/MyProfile';
 import PatientLayout from './pages/PatientLayout';
+import PatientPrescriptions from './pages/patient/PatientPrescriptions';
+import PatientDocuments from './pages/patient/PatientDocuments';
+import PatientVisits from './pages/patient/PatientVisits';
+import PatientAccess from './pages/patient/PatientAccess';
 import { FullPageSpinner } from './components/medis';
 import { Toaster } from './components/ui';
 
@@ -45,7 +49,12 @@ export default function App() {
               </ProtectedRoute>
             }
           >
+            {/* The five dashboard sections. Dashboard is the default. */}
             <Route index element={<PatientDashboard />} />
+            <Route path="prescriptions" element={<PatientPrescriptions />} />
+            <Route path="documents" element={<PatientDocuments />} />
+            <Route path="visits" element={<PatientVisits />} />
+            <Route path="access" element={<PatientAccess />} />
             <Route path="profile" element={<MyProfile />} />
             <Route path="onboarding" element={<Onboarding />} />
           </Route>

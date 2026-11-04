@@ -65,6 +65,12 @@ class Supa:
     async def select(self, table, params):
         return (await self._request("GET", f"/rest/v1/{table}", params=params)).json()
 
+    async def rpc(self, name, args):
+        """Calls a Postgres function as this user, so SECURITY DEFINER
+        functions still see the caller in auth.uid()."""
+        response = await self._request("POST", f"/rest/v1/rpc/{name}", json=args)
+        return response.json() if response.content else None
+
     async def insert(self, table, row):
         response = await self._request("POST", f"/rest/v1/{table}", json=row,
                                        headers={"Prefer": "return=representation"})

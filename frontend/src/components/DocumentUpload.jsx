@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, FileText, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabaseClient';
-import { openStoredDocument } from '../lib/patientAccess';
+import { logPatientAccess, openStoredDocument } from '../lib/patientAccess';
 import { formatDate } from '../lib/format';
 import { Button, Input, Label, SimpleSelect } from './ui';
 import { EmptyState, StatusPill } from './medis';
 
-const CATEGORIES = [
+export const CATEGORIES = [
   { value: 'ecg', label: 'ECG' },
   { value: 'blood_report', label: 'Blood Report' },
   { value: 'lipid_profile', label: 'Lipid Profile' },
@@ -32,6 +32,37 @@ const REVIEW_PILL = {
 
 export function categoryLabel(value) {
   return CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+/**
+ * The document categories grouped the way patients look for them. Every
+ * existing `medical_reports.category` value maps into exactly one group,
+ * and anything unrecognised falls into "Other medical records", so no
+ * document is ever hidden by a filter.
+ */
+export const CATEGORY_GROUPS = [
+  { value: 'blood', label: 'Blood Test Reports', categories: ['blood_report', 'lipid_profile', 'hba1c'] },
+  { value: 'ecg', label: 'ECG Reports', categories: ['ecg'] },
+  { value: 'xray', label: 'X-ray Reports', categories: ['xray'] },
+  { value: 'scan', label: 'Scan Reports', categories: ['ct_scan', 'mri', 'cardiac_report'] },
+  { value: 'prescription', label: 'Prescriptions', categories: ['prescription'] },
+  { value: 'discharge', label: 'Discharge Summaries', categories: ['discharge_summary'] },
+  { value: 'other', label: 'Other Medical Records', categories: ['medical_history', 'other'] },
+];
+
+export function groupOf(category) {
+  return CATEGORY_GROUPS.find((g) => g.categories.includes(category))?.value ?? 'other';
+}
+
+/** Largest upload the form accepts, matching the storage bucket limit. */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+export function formatFileSize(bytes) {
+  if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) return null;
+  const size = Number(bytes);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -94,6 +125,10 @@ export default function DocumentUpload({
       setError('Only PDF or image files are allowed.');
       return;
     }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(`This file is ${formatFileSize(file.size)}. The limit is ${formatFileSize(MAX_UPLOAD_BYTES)} — please upload a smaller copy.`);
+      return;
+    }
 
     setUploading(true);
 
@@ -116,6 +151,7 @@ export default function DocumentUpload({
       file_name: file.name,
       file_url: path, // storage path; resolved to a signed URL when viewing
       file_type: fileType,
+      file_size_bytes: file.size ?? null,
       category,
       hospital_id: hospitalId || null,
       doctor_name_note: doctorNameNote || null,
@@ -138,13 +174,7 @@ export default function DocumentUpload({
     }
 
     if (doctorId) {
-      supabase.from('audit_logs').insert({
-        user_id: doctorId,
-        action: 'uploaded_report',
-        target_id: patientId,
-        target_type: 'patient',
-        metadata: { category, consultation_id: consultationId ?? null },
-      });
+      logPatientAccess(patientId, 'uploaded_report', { category, consultation_id: consultationId ?? null });
     }
 
     resetForm();

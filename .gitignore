@@ -26,3 +26,6 @@ backend/logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+
+/test-results/

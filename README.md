@@ -100,8 +100,13 @@ In the Supabase SQL editor, run the migrations in order:
 
 1. `supabase_migration_v1.sql`, `v2`, `v3`, `v3b` (the base schema)
 2. `supabase_migration_v3c.sql` → `v3d` → `v3e` → `v3f`
-3. `supabase_migration_v4.sql` → `v5` → `v6`
+3. `supabase_migration_v4.sql` → `v5` → `v6` → `v7` → `v8`
 4. Optional: `demo_seed.sql`, which loads the demo accounts and data
+
+`v8` is required by the dashboards: it adds the per-event access history
+(`log_patient_access`, `get_patient_access_events`), the richer visit
+history (`get_patient_visits`, `get_patient_visit_details`), document
+deletion (`delete_medical_report`) and `medical_reports.file_size_bytes`.
 
 ### 2. Backend (AI service)
 ```bash

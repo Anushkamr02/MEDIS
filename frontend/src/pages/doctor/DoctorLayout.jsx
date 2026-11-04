@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { CalendarDays, FilePen, LayoutDashboard, LogOut, Menu, Search, UserRound, Users, X } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutDashboard, LogOut, Menu, UserRound, Users, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { cn } from '../../lib/utils';
-import { Button, Input } from '../../components/ui';
+import { Button } from '../../components/ui';
 import { IDChip, Logo } from '../../components/medis';
 import NotificationBell from '../../components/NotificationBell';
 
 const NAV_ITEMS = [
   { to: '/doctor', label: 'Overview', icon: LayoutDashboard, end: true },
-  { to: '/doctor/search', label: 'Search Patient', icon: Search },
   { to: '/doctor/patients', label: 'My Patients', icon: Users },
   { to: '/doctor/appointments', label: 'Appointments', icon: CalendarDays },
   { to: '/doctor/drafts', label: 'Drafts', icon: FilePen, badge: 'drafts' },
@@ -19,8 +18,7 @@ const NAV_ITEMS = [
 
 /**
  * Shared shell for every /doctor/* page: sidebar navigation (with the
- * doctor's permanent ID + hospital), a top bar with quick Patient ID
- * search and notifications, and an <Outlet /> for the active page. The
+ * doctor's permanent ID + hospital), a top bar with notifications, and an <Outlet /> for the active page. The
  * doctor_profiles row is loaded once here and passed down via Outlet
  * context so child pages don't re-fetch it.
  */
@@ -33,7 +31,6 @@ export default function DoctorLayout() {
   const [draftCount, setDraftCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [quickSearch, setQuickSearch] = useState('');
 
   // Exposed to child pages so the profile page can reload after an edit
   const loadDoctorProfile = useCallback(async () => {
@@ -158,24 +155,6 @@ export default function DoctorLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={() => setMenuOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <form
-            className="relative hidden max-w-xs flex-1 sm:block"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const q = quickSearch.trim();
-              navigate(q ? `/doctor/search?q=${encodeURIComponent(q)}` : '/doctor/search');
-              setQuickSearch('');
-            }}
-          >
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={quickSearch}
-              onChange={(e) => setQuickSearch(e.target.value)}
-              placeholder="Search Patient ID (MEDIS-P-…)"
-              className="pl-8 font-mono text-xs"
-              aria-label="Quick search patient ID"
-            />
-          </form>
           <div className="ml-auto">
             <NotificationBell notifications={notifications} onMarkRead={markRead} onMarkAllRead={markAllRead} />
           </div>

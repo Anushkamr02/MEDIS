@@ -1,10 +1,10 @@
 // MEDIS building blocks from the teammate's design: brand, ID chip,
 // status/priority pills, section cards and empty/error/loading states.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, CircleDot, CloudOff, Copy, Inbox, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button } from './ui';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui';
 import { cn } from '../lib/utils';
 import { priorityInfo } from '../lib/aiPriority';
 import medicalEmblem from './medical-emblem.png';
@@ -181,6 +181,86 @@ export function Section({ title, icon, action, children, className, id }) {
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * A Section whose body scrolls inside the panel instead of growing it.
+ *
+ * The outer panel is a flex column with `overflow-hidden` and a height
+ * cap (`maxHeight`, or `height` for a fixed one). The header is
+ * `shrink-0`, so adding records never moves it, and the body gets
+ * `flex-1` + `min-h-0` so it takes the leftover space and scrolls
+ * rather than stretching the panel — or the panel beside it in a grid.
+ * `min-w-0` on the panel and its body stops a long file name or ID
+ * from widening the grid column.
+ *
+ * The body is focusable (`tabIndex={0}`) so the list is reachable with
+ * the keyboard alone; the scrollbar styling lives in `.medis-scroll`.
+ * `maxHeight` is per-panel on purpose — there is no one universal
+ * height — and it can be a responsive Tailwind class via `bodyClassName`
+ * instead if a panel needs breakpoint-specific sizing.
+ */
+export function ScrollPanel({ id, title, icon, action, children, footer, className, bodyClassName, maxHeight = '28rem', label }) {
+  return (
+    <section
+      id={id}
+      style={maxHeight ? { maxHeight } : undefined}
+      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-card scroll-mt-20', className)}
+    >
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3 sm:px-5">
+        <h2 className="flex min-w-0 items-center gap-2 text-base font-semibold">
+          {icon}
+          <span className="truncate">{title}</span>
+        </h2>
+        {action}
+      </div>
+      <div
+        tabIndex={0}
+        role="group"
+        aria-label={label ?? (typeof title === 'string' ? `${title}, scrollable` : undefined)}
+        className={cn('medis-scroll min-h-0 min-w-0 flex-1 px-4 py-3 sm:px-5', bodyClassName)}
+      >
+        {children}
+      </div>
+      {footer && <div className="shrink-0 border-t px-4 py-2 text-xs text-muted-foreground sm:px-5">{footer}</div>}
+    </section>
+  );
+}
+
+/**
+ * The "View details" modal both dashboards use: an accessible label, a
+ * description for screen readers, a close button, Escape to dismiss and
+ * focus returned to the trigger (all from Radix Dialog). Tall content
+ * scrolls inside the modal rather than off-screen.
+ */
+export function DetailsDialog({ open, onOpenChange, title, description, children, footer }) {
+  // Remember what had focus when the modal opened and put it back on
+  // close, so a "View details" button does not lose the keyboard.
+  const opener = useRef(null);
+  useEffect(() => {
+    if (open) {
+      opener.current = document.activeElement;
+      return undefined;
+    }
+    const target = opener.current;
+    opener.current = null;
+    if (!target?.isConnected) return undefined;
+    const frame = requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90dvh] max-w-2xl grid-rows-[auto_1fr_auto] overflow-hidden p-0">
+        <DialogHeader className="border-b px-5 py-4 pr-12 text-left">
+          <DialogTitle className="pr-2">{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="medis-scroll min-h-0 px-5 py-4">{children}</div>
+        {footer && <DialogFooter className="gap-2 border-t px-5 py-3">{footer}</DialogFooter>}
+      </DialogContent>
+    </Dialog>
   );
 }
 

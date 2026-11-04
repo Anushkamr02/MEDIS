@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Loader2, Search } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
+import { openPatientRecord } from '../../lib/patientAccess';
 import { useAuth } from '../../context/AuthContext';
 import { useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorData';
 import { formatDate, calcAge, humanize } from '../../lib/format';
@@ -16,19 +18,80 @@ const PRIORITY_FILTERS = {
   review: { label: 'Needs review', matches: (p) => p === 'REVIEW' },
 };
 
-/**
- * Patients this doctor already has access to. New patients are added
- * through Search Patient, never from here — this list only filters
- * what the doctor can already see. Critical patients (latest AI check)
- * are listed first.
- */
+// One search filters accessible patients and looks up new patients by full ID.
 export default function MyPatients() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { patients, loading, error } = useAssignedPatients(user?.id);
   const { latest } = useLatestPriorities(patients.map((p) => p.patient_id));
-  const [filter, setFilter] = useState('');
+  const initial = searchParams.get('q') ?? '';
+  const [filter, setFilter] = useState(initial);
+  const [results, setResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [openingId, setOpeningId] = useState(null);
+  const requestId = useRef(0);
+
+  const runSearch = useCallback(async (value) => {
+    const currentRequest = ++requestId.current;
+    const id = value.trim().toUpperCase();
+    setSearchError('');
+    setResults(null);
+    setSearching(false);
+    if (!/^MEDIS-P-(?:\d{4}-)?\d+$/i.test(id)) {
+      setSearchError('Enter a full Patient ID to look up a new patient. You can filter your patients by name as you type.');
+      return;
+    }
+    setSearching(true);
+    try {
+      const { data, error } = await supabase.rpc('search_patient_by_display_id', { p_display_id: id });
+      if (currentRequest !== requestId.current) return;
+      if (error) throw error;
+      setResults(data ?? []);
+    } catch (error) {
+      if (currentRequest === requestId.current) setSearchError(error.message || 'Could not search patients. Try again.');
+    } finally {
+      if (currentRequest === requestId.current) setSearching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setFilter(initial);
+    if (initial) runSearch(initial);
+    return () => { requestId.current += 1; };
+  }, [initial, runSearch]);
+
+  function updateFilter(value) {
+    requestId.current += 1;
+    setFilter(value);
+    setResults(null);
+    setSearchError('');
+    setSearching(false);
+  }
+
+  function clearSearch() {
+    updateFilter('');
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params);
+      next.delete('q');
+      return next;
+    });
+  }
+
+  async function openRecord(patient) {
+    setSearchError('');
+    setOpeningId(patient.patient_id);
+    try {
+      const { error } = await openPatientRecord(user.id, patient.patient_id, 'search', { display_id: patient.display_id });
+      if (error) throw error;
+      navigate(`/doctor/patients/${patient.patient_id}`);
+    } catch (error) {
+      setSearchError(error.message || 'Could not open the patient record. Try again.');
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   const priorityFilter = PRIORITY_FILTERS[searchParams.get('priority')] ? searchParams.get('priority') : 'all';
   const term = filter.trim().toLowerCase();
@@ -47,23 +110,51 @@ export default function MyPatients() {
   return (
     <div className="space-y-5">
       <BackButton />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold">My patients</h1>
-        <Button asChild>
-          <Link to="/doctor/search">
-            <Search className="h-4 w-4" />
-            Search patient
-          </Link>
-        </Button>
-      </div>
+      <h1 className="text-2xl font-bold">My patients</h1>
+      <Section title="Find a patient">
+        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); runSearch(filter); }}>
+          <Input
+            className="min-w-0 flex-1 basis-56"
+            aria-label="Patient ID"
+            placeholder="Search by name or Patient ID"
+            value={filter}
+            onChange={(e) => updateFilter(e.target.value)}
+          />
+          <Button type="submit" disabled={searching || !filter.trim()}>
+            {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            Search
+          </Button>
+          {filter && <Button type="button" variant="outline" onClick={clearSearch}>Clear</Button>}
+        </form>
+        <p className="mt-2 text-xs text-muted-foreground">Type a name or ID to filter your patients. To find a new patient, enter their full MEDIS Patient ID and select Search.</p>
+        {searchError && <div className="mt-3"><ErrorState text={searchError} /></div>}
+        {results?.length === 0 && <p className="mt-3 text-sm" role="status">No patient with ID {filter.trim().toUpperCase()}. Check the ID and try again.</p>}
+        {results?.map((patient) => (
+          <div key={patient.patient_id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+            <div>
+              <p className="font-semibold">{patient.full_name || 'Unnamed patient'}</p>
+              <IDChip id={patient.display_id} />
+            </div>
+            <Button onClick={() => openRecord(patient)} disabled={openingId !== null}>
+              {openingId === patient.patient_id && <Loader2 className="h-4 w-4 animate-spin" />}
+              Open record
+            </Button>
+            <p className="w-full text-xs text-muted-foreground">Opening the record grants access and is logged in the patient's access history.</p>
+          </div>
+        ))}
+      </Section>
       <div className="flex flex-wrap items-center gap-3">
         <SegmentedTabs
           label="AI check filter"
           options={Object.entries(PRIORITY_FILTERS).map(([v, f]) => [v, f.label])}
           value={priorityFilter}
-          onChange={(v) => setSearchParams(v === 'all' ? {} : { priority: v })}
+          onChange={(v) => setSearchParams((params) => {
+            const next = new URLSearchParams(params);
+            if (v === 'all') next.delete('priority');
+            else next.set('priority', v);
+            return next;
+          })}
         />
-        <Input className="max-w-xs" placeholder="Filter by name or Patient ID" value={filter} onChange={(e) => setFilter(e.target.value)} />
       </div>
       {error && <ErrorState text={error} />}
       <Section title={`${visible.length} patient${visible.length === 1 ? '' : 's'}`}>
@@ -74,7 +165,9 @@ export default function MyPatients() {
             text={
               patients.length === 0
                 ? 'No patients yet. Search a Patient ID to open a record.'
-                : priorityFilter !== 'all'
+                : term
+                  ? 'No patients match this search.'
+                  : priorityFilter !== 'all'
                   ? 'No patients in this group. Run the AI analysis from a patient\'s profile to check them.'
                   : 'No patients match this filter.'
             }
