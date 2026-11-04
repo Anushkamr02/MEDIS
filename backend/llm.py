@@ -23,9 +23,10 @@ from google.genai import errors, types
 from supa import ROOT
 
 _env = dotenv_values(ROOT / ".env")
-MODEL = os.environ.get("MEDIS_LLM_MODEL") or _env.get("MEDIS_LLM_MODEL") or "gemini-3.8-flash"
+MODEL = os.environ.get("MEDIS_LLM_MODEL") or _env.get("MEDIS_LLM_MODEL") or "gemini-3.5-flash"
 _client = None
 REQUEST_TIMEOUT_SECONDS = 45
+RETRY_DELAYS_SECONDS = (1, 3)  # retries when Gemini answers 503 (model overloaded)
 
 BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION", "OTHER"}
 
@@ -56,10 +57,17 @@ async def generate_json(system, messages, schema, *, effort):
         thinking_config=types.ThinkingConfig(thinking_level=effort.upper()),
     )
     try:
-        response = await asyncio.wait_for(
-            client().aio.models.generate_content(model=MODEL, contents=contents, config=config),
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
+        for delay in (*RETRY_DELAYS_SECONDS, None):
+            try:
+                response = await asyncio.wait_for(
+                    client().aio.models.generate_content(model=MODEL, contents=contents, config=config),
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                break
+            except errors.APIError as exc:
+                if exc.code != 503 or delay is None:
+                    raise
+                await asyncio.sleep(delay)
     except (TimeoutError, httpx.TimeoutException):
         raise HTTPException(504, "Gemini took too long to respond. Please try generating the answer again in a moment.")
     except errors.APIError as exc:

@@ -6,7 +6,7 @@ import { Button, Input, Label } from '../components/ui';
 import AuthLayout from '../components/AuthLayout';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -16,11 +16,27 @@ export default function Login() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    if (!email || !password) {
-      setError('Enter your email and password.');
+    const id = identifier.trim();
+    if (!id || !password) {
+      setError('Enter your email or MEDIS ID and password.');
       return;
     }
     setSubmitting(true);
+
+    // A MEDIS ID is resolved to the account email; the lookup only succeeds with the right password.
+    let email = id;
+    if (!id.includes('@')) {
+      const { data: resolved, error: resolveError } = await supabase.rpc('resolve_login_email', {
+        p_medis_id: id,
+        p_password: password,
+      });
+      if (resolveError || !resolved) {
+        setSubmitting(false);
+        setError(resolveError ? 'Could not sign in. Please try again.' : 'Invalid MEDIS ID or password.');
+        return;
+      }
+      email = resolved;
+    }
 
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
@@ -54,14 +70,14 @@ export default function Login() {
       <p className="mt-2 text-sm text-muted-foreground">Log in to MEDIS.</p>
       <form onSubmit={handleSubmit} className="mt-7 space-y-5" noValidate>
         <div className="space-y-2">
-          <Label htmlFor="login-email">Email</Label>
+          <Label htmlFor="login-email">Email or MEDIS ID</Label>
           <Input
             id="login-email"
-            type="email"
-            placeholder="you@example.com"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="text"
+            placeholder="you@example.com or MEDIS-P-00001"
+            autoComplete="username"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             className="h-11 bg-background"
           />
         </div>

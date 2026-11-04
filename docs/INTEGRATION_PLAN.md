@@ -206,7 +206,7 @@ doctor's graphs. That way the graph and the AI text are built from exactly the s
     doesn't match, the summary is regenerated or flagged.
 - Saved in `cad_assessments.ai_summary` with the model name and time.
 - The doctor sees *"AI-generated · based on N visits up to <date>"* and a **Regenerate** button.
-- **Model:** Google Gemini (`gemini-3.8-flash`, free tier) through the backend only; the key
+- **Model:** Google Gemini (`gemini-3.5-flash`, free tier) through the backend only; the key
   (`GEMINI_API_KEY` in `backend/.env`) never reaches the browser. `MEDIS_LLM_MODEL` overrides
   the model. On the free tier Google may use prompts to improve its products, so it is for demo
   data only; real patient data needs a paid key.

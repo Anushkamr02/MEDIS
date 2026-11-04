@@ -36,7 +36,7 @@ test('authentication shares one layout, validates, and expands for doctor regist
 test('login preserves server errors and routes a successful login', async ({ page }) => {
   const state = await mockApp(page, 'anonymous', { failLogin: true });
   await page.goto('/login');
-  await page.getByLabel('Email', { exact: true }).fill('doctor@example.test');
+  await page.getByLabel('Email or MEDIS ID', { exact: true }).fill('doctor@example.test');
   await page.getByLabel('Password', { exact: true }).fill('synthetic-secret');
   await page.getByRole('button', { name: 'Log in', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Invalid login credentials');
