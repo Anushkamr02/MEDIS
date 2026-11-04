@@ -8,12 +8,12 @@ export default function AuthLayout({ children, badge = 'Secure sign-in' }) {
       <aside className="hidden min-w-0 flex-col justify-between gap-12 bg-primary-soft px-8 py-10 md:flex xl:px-14 xl:py-12">
         <Logo className="text-2xl tracking-normal" />
         <div className="max-w-lg py-6">
-          <h1 className="font-display text-4xl font-bold leading-tight tracking-normal xl:text-5xl">
+          <h1 className="auth-hero-title font-display font-bold leading-tight tracking-normal">
             One patient ID.
             <br />
             Every hospital.
           </h1>
-          <p className="mt-4 text-2xl font-semibold leading-snug text-primary">
+          <p className="auth-hero-subtitle mt-4 font-semibold leading-snug text-primary">
             Your heart-health history,
             <br className="hidden xl:block" /> all in one place.
           </p>
@@ -32,7 +32,7 @@ export default function AuthLayout({ children, badge = 'Secure sign-in' }) {
           <EcgLine className="absolute inset-x-0 bottom-10 h-12 text-primary/8" />
         </div>
         <Logo className="relative z-10 mb-14 text-2xl tracking-normal md:hidden" />
-        <div className="relative z-10 my-auto w-full max-w-md self-center py-6 md:my-0">
+        <div className="relative z-10 my-auto w-full max-w-[clamp(28rem,28vw,34rem)] self-center py-6 md:my-0">
           <div className="auth-card rounded-2xl border bg-card/85 p-7 shadow-card backdrop-blur-sm sm:p-9">
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
               <ShieldCheck className="h-3.5 w-3.5" /> {badge}

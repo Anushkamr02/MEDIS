@@ -26,8 +26,37 @@ It adds:
 | `medical_reports.file_size_bytes` | Recorded by the upload form from now on. Older rows stay null and the UI says the size is unknown. |
 | `idx_audit_logs_target_created` | Index for the access-history query. |
 
-Without v8 the dashboards report the missing functions as load errors; uploads
-also fail, because the insert now carries `file_size_bytes`.
+For databases through v7, dashboard reads now fall back only when PostgREST
+reports a missing RPC (`PGRST202`). Access history uses the v3f
+`get_patient_access_history` summary, explicitly labelled as one row per doctor.
+Visit details use existing consultations, prescriptions and medical_reports
+queries under the signed-in user's RLS policies. Unshared visits expose only
+timeline metadata, and patients cannot open drafts. Permission and server errors
+remain errors. V8 is still required for server-side access logging, document
+deletion and uploads carrying `file_size_bytes`.
+
+If the dashboard reports `Could not find the function
+public.get_patient_access_events(...) in the schema cache`, run the full v8
+migration in the Supabase SQL editor for the project configured by
+`frontend/.env` (`VITE_SUPABASE_URL`). The frontend sends the six named
+parameters defined by v8; an older function signature cannot serve this call.
+The migration now requests a PostgREST schema-cache refresh on commit.
+If v8 already completed successfully, refresh the cache directly:
+
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+Then retry loading access history. A cache refresh alone does not create a
+missing function. To check that the required signature exists, run:
+
+```sql
+SELECT to_regprocedure(
+  'public.get_patient_access_events(uuid,text,timestamptz,timestamptz,integer,integer)'
+);
+```
+
+A null result means the required function is absent; apply v8 after v7.
 
 ## Container scrolling
 

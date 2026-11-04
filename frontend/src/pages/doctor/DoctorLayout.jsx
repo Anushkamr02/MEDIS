@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui';
-import { IDChip, Logo } from '../../components/medis';
+import { BackButton, IDChip, Logo } from '../../components/medis';
 import NotificationBell from '../../components/NotificationBell';
 
 const NAV_ITEMS = [
@@ -155,6 +155,7 @@ export default function DoctorLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu" onClick={() => setMenuOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
+          {location.pathname !== '/doctor' && <BackButton className="ml-0 mb-0" />}
           <div className="ml-auto">
             <NotificationBell notifications={notifications} onMarkRead={markRead} onMarkAllRead={markAllRead} />
           </div>

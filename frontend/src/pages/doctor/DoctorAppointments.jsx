@@ -20,7 +20,7 @@ import {
   Label,
   SimpleSelect,
 } from '../../components/ui';
-import { BackButton, EmptyState, ErrorState, Section, SegmentedTabs, Spinner, StatusPill, pillValue } from '../../components/medis';
+import { EmptyState, ErrorState, Section, SegmentedTabs, Spinner, StatusPill, pillValue } from '../../components/medis';
 import { isAppointmentNow, isAppointmentOpen, openPatientRecord } from '../../lib/patientAccess';
 
 const DURATIONS = [15, 30, 45, 60];
@@ -178,7 +178,6 @@ export default function DoctorAppointments() {
 
   return (
     <div className="space-y-5">
-      <BackButton />
       <h1 className="text-2xl font-bold">Appointments</h1>
       <Section title="Book appointment">
         {consultationId && <p className="mb-3 text-xs text-muted-foreground">This appointment will be linked to the consultation you came from.</p>}

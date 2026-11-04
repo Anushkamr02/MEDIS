@@ -450,6 +450,9 @@ alter table public.medical_reports
 create index if not exists idx_audit_logs_target_created
   on public.audit_logs (target_id, created_at desc);
 
+-- Delivered on commit so PostgREST discovers the new RPC signatures.
+notify pgrst, 'reload schema';
+
 commit;
 
 -- ============================================================

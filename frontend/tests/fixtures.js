@@ -85,19 +85,21 @@ export async function mockApp(page, role = 'doctor', options = {}) {
       const live = new Set(state.consultations.map((c) => c.id));
       return send(state.visits.filter((v) => !v.consultation_id.startsWith('visit-') ? live.has(v.consultation_id) : true));
     }
-    if (name === 'get_patient_access_history') return send([]);
+    if (name === 'get_patient_access_history') return send(state.accessSummary ?? []);
     if (name === 'log_patient_access') {
       if (state.failAccessLog) return send({ code: '42501', message: 'Not authorized to access this patient record.' }, 403);
       state.accessLogs = [...(state.accessLogs ?? []), body];
       return send(null, 204);
     }
     if (name === 'get_patient_access_events') {
+      if (state.missingDashboardRpcs) return send({ code: 'PGRST202', message: 'Function missing from schema cache' }, 404);
       if (state.failAccessEvents) return send({ message: 'Access history unavailable' }, 500);
       const search = (body?.p_search ?? '').toLowerCase();
       const matched = state.accessEvents.filter((e) => !search || (e.doctor_name + e.doctor_display_id).toLowerCase().includes(search));
       return send(matched.map((e) => ({ ...e, total_count: matched.length })));
     }
     if (name === 'get_patient_visit_details') {
+      if (state.missingDashboardRpcs) return send({ code: 'PGRST202', message: 'Function missing from schema cache' }, 404);
       const visit = state.visits.find((v) => v.consultation_id === body.p_consultation_id);
       if (!visit) return send({ message: 'Visit not found' }, 403);
       return send({

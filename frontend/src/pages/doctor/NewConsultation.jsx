@@ -28,7 +28,7 @@ import {
   Switch,
   Textarea,
 } from '../../components/ui';
-import { BackButton, ErrorState, Field, IDChip, Section, Spinner, StatusPill, pillValue } from '../../components/medis';
+import { ErrorState, Field, IDChip, Section, Spinner, StatusPill, pillValue } from '../../components/medis';
 
 const CONSULTATION_SELECT = '*, hospitals(name), doctor:doctor_id(full_name, display_id)';
 
@@ -510,7 +510,6 @@ export default function NewConsultation() {
   if (loadError) {
     return (
       <div className="space-y-3">
-        <BackButton />
         <ErrorState text={`Couldn't open consultation: ${loadError}`} />
       </div>
     );
@@ -564,7 +563,6 @@ export default function NewConsultation() {
 
   return (
     <div className={cn('space-y-5', isOwner && !readOnly && 'pb-24')}>
-      <BackButton />
       <div className="rounded-xl border bg-card p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

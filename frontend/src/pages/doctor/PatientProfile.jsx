@@ -9,7 +9,7 @@ import { logPatientAccess } from '../../lib/patientAccess';
 import { formatDate, formatDateTime, calcAge, calcBmi, humanize } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { Button, SimpleSelect } from '../../components/ui';
-import { BackButton, EmptyState, ErrorState, Field, IDChip, Section, Spinner, WarningState } from '../../components/medis';
+import { EmptyState, ErrorState, Field, IDChip, Section, Spinner, WarningState } from '../../components/medis';
 import DocumentUpload from '../../components/DocumentUpload';
 import MedicalDocumentsPanel from '../../components/MedicalDocumentsPanel';
 import MedicationForm from '../../components/MedicationForm';
@@ -165,7 +165,6 @@ export default function PatientProfile() {
   if (!profile) {
     return (
       <div className="space-y-3">
-        <BackButton />
         <EmptyState
           text="You don't have access to this record yet. You can only view patients whose record you've opened via their Patient ID or an appointment."
           action={
@@ -185,7 +184,6 @@ export default function PatientProfile() {
 
   return (
     <div className="min-w-0 space-y-5">
-      <BackButton />
       {error && <ErrorState text={`Some data failed to load: ${error}`} onRetry={refresh} />}
 
       {appointment && (

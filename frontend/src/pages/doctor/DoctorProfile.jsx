@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { humanize } from '../../lib/format';
 import { Button, Input, Label, SimpleSelect } from '../../components/ui';
-import { BackButton, Field, IDChip, Section } from '../../components/medis';
+import { Field, IDChip, Section } from '../../components/medis';
 
 function formFromProfiles(profile, doctorProfile) {
   return {
@@ -140,7 +140,6 @@ export default function DoctorProfile() {
 
   return (
     <div className="space-y-5">
-      <BackButton />
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-hero p-5 text-navy-foreground shadow-card">
         <div>
           <h1 className="text-2xl font-bold">Dr. {profile?.full_name || ''}</h1>

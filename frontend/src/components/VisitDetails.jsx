@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabaseClient';
+import { loadVisitDetails } from '../lib/dashboardCompatibility';
 import { openStoredDocument } from '../lib/patientAccess';
 import { formatDate, formatDateTime, humanize } from '../lib/format';
 import { Button } from './ui';
@@ -31,8 +32,8 @@ function entriesOf(object, labels) {
 
 /**
  * One visit in full: the complete record of that consultation, loaded
- * through get_patient_visit_details() so the server decides what this
- * viewer may see. A patient gets nothing clinical from a visit the
+ * through get_patient_visit_details(), or RLS-protected table queries on
+ * older databases. A patient gets nothing clinical from a visit the
  * doctor has not shared, and never sees a draft.
  *
  * Used by the visit history panel on both the doctor and the patient
@@ -49,9 +50,7 @@ export default function VisitDetails({ visit, open, onOpenChange, onViewDocument
     if (!consultationId) return;
     setLoading(true);
     setError('');
-    const { data: row, error: rpcError } = await supabase.rpc('get_patient_visit_details', {
-      p_consultation_id: consultationId,
-    });
+    const { data: row, error: rpcError } = await loadVisitDetails(supabase, visit);
     if (rpcError) {
       setError(rpcError.message);
       setData(null);
@@ -59,7 +58,7 @@ export default function VisitDetails({ visit, open, onOpenChange, onViewDocument
       setData(row);
     }
     setLoading(false);
-  }, [consultationId]);
+  }, [consultationId, visit]);
 
   useEffect(() => {
     if (open) load();

@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { formatDateTime } from '../../lib/format';
 import { Button } from '../../components/ui';
-import { BackButton, EmptyState, ErrorState, IDChip, Section, Spinner } from '../../components/medis';
+import { EmptyState, ErrorState, IDChip, Section, Spinner } from '../../components/medis';
 
 /**
  * This doctor's unfinished consultations (status 'pending'). Drafts are
@@ -34,7 +34,6 @@ export default function Drafts() {
 
   return (
     <div className="space-y-5">
-      <BackButton />
       <div>
         <h1 className="text-2xl font-bold">Drafts</h1>
         <p className="text-sm text-muted-foreground">Visits you started but haven't finalized. Only you can see these.</p>

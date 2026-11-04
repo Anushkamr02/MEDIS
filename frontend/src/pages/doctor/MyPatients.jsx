@@ -8,7 +8,7 @@ import { useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorD
 import { formatDate, calcAge, humanize } from '../../lib/format';
 import { priorityInfo } from '../../lib/aiPriority';
 import { Button, Input } from '../../components/ui';
-import { BackButton, EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner } from '../../components/medis';
+import { EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner } from '../../components/medis';
 
 // ?priority= values (links from the Overview cards)
 const PRIORITY_FILTERS = {
@@ -109,7 +109,6 @@ export default function MyPatients() {
 
   return (
     <div className="space-y-5">
-      <BackButton />
       <h1 className="text-2xl font-bold">My patients</h1>
       <Section title="Find a patient">
         <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); runSearch(filter); }}>

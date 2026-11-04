@@ -334,10 +334,10 @@ export function Field({ label, value }) {
   );
 }
 
-export function BackButton({ to }) {
+export function BackButton({ to, className }) {
   const navigate = useNavigate();
   return (
-    <Button variant="ghost" size="sm" className="-ml-2 mb-2 text-muted-foreground" onClick={() => (to ? navigate(to) : navigate(-1))}>
+    <Button variant="ghost" size="sm" className={cn('-ml-2 mb-2 text-muted-foreground', className)} onClick={() => (to ? navigate(to) : navigate(-1))}>
       <ArrowLeft className="h-4 w-4" />
       Back
     </Button>

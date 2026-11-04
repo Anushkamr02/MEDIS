@@ -25,7 +25,7 @@ export default function PatientAccess() {
       <div>
         <h1 className="text-2xl font-bold">Doctors who accessed your profile</h1>
         <p className="text-sm text-muted-foreground">
-          Each entry is an access the server recorded at the moment it happened. Nothing here is an example or a placeholder.
+          Review recorded doctor access and the doctors granted access to your profile.
         </p>
       </div>
 

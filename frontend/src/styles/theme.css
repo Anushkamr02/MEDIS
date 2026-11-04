@@ -4,6 +4,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Auth typography scales continuously while retaining readable minimums.
+   rem bounds preserve browser font-size and zoom preferences. */
+.auth-layout {
+  --text-xs: clamp(0.75rem, 0.68rem + 0.15vw, 0.875rem);
+  --text-sm: clamp(0.875rem, 0.78rem + 0.2vw, 1rem);
+  --text-base: clamp(1rem, 0.9rem + 0.2vw, 1.125rem);
+  --text-2xl: clamp(1.25rem, 1.05rem + 0.65vw, 1.875rem);
+}
+
+.auth-hero-title {
+  font-size: clamp(2rem, 0.5rem + 2.8vw, 4rem);
+  overflow-wrap: break-word;
+}
+
+.auth-hero-subtitle {
+  font-size: clamp(1.125rem, 0.6rem + 1.1vw, 1.875rem);
+}
+
+/* Keep fields legible and avoid automatic focus zoom on mobile Safari. */
+.auth-card input,
+.auth-card select {
+  font-size: max(1rem, var(--text-sm));
+}
+
 @theme inline {
   --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;

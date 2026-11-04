@@ -16,7 +16,7 @@ export default function AccessHistory({ rows, currentUserId }) {
     <div className="space-y-2">
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Lock className="h-3 w-3" />
-        Every time a doctor opens this record it is logged here.
+        Doctors granted access, with their first access and latest recorded profile view.
       </p>
       <ul className="divide-y rounded-lg border">
         {rows.map((r) => (

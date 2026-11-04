@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Lock, Search, ShieldCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { isMissingRpc } from '../lib/dashboardCompatibility';
+import AccessHistory from './AccessHistory';
 import { formatDate, formatDateTime } from '../lib/format';
 import { Button, Input, Label } from './ui';
 import { DetailsDialog, EmptyState, ErrorState, Field, IDChip, ScrollPanel, Spinner } from './medis';
@@ -55,6 +57,7 @@ export default function AccessEventsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
+  const [summary, setSummary] = useState(null);
 
   // Typing should not fire a query per keystroke.
   useEffect(() => {
@@ -79,11 +82,19 @@ export default function AccessEventsPanel({
       p_limit: PAGE_SIZE,
       p_offset: page * PAGE_SIZE,
     });
-    if (rpcError) {
+    if (isMissingRpc(rpcError)) {
+      const legacy = await supabase.rpc('get_patient_access_history', { p_patient_id: patientId });
+      setError(legacy.error?.message ?? '');
+      setSummary(legacy.data ?? []);
+      setRows([]);
+      setTotal(0);
+    } else if (rpcError) {
+      setSummary(null);
       setError(rpcError.message);
       setRows([]);
       setTotal(0);
     } else {
+      setSummary(null);
       setRows(data ?? []);
       setTotal(data?.[0]?.total_count ? Number(data[0].total_count) : 0);
     }
@@ -102,6 +113,33 @@ export default function AccessEventsPanel({
     setTerm('');
     setFrom('');
     setTo('');
+  }
+
+  if (summary !== null) {
+    const filtered = summary.filter((row) => {
+      const name = `${row.doctor_name ?? ''} ${row.doctor_display_id ?? ''}`.toLowerCase();
+      const timestamp = row.last_accessed || row.first_access;
+      return (!debounced || name.includes(debounced.toLowerCase()))
+        && (!from || (timestamp && Date.parse(timestamp) >= Date.parse(startOfLocalDay(from))))
+        && (!to || (timestamp && Date.parse(timestamp) <= Date.parse(endOfLocalDay(to))));
+    });
+    return (
+      <ScrollPanel id="access" title={title} maxHeight={maxHeight} className={className}>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Access summary by doctor. This database provides first and latest access times rather than individual access events.
+        </p>
+        <div className="mb-3 space-y-2">
+          <Input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search by doctor name or doctor ID" aria-label="Search access history by doctor" />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div><Label htmlFor="summary-from">Latest access from</Label><Input id="summary-from" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} /></div>
+            <div><Label htmlFor="summary-to">Latest access to</Label><Input id="summary-to" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></div>
+          </div>
+        </div>
+        {filtering && <Button size="sm" variant="ghost" onClick={clearFilters}>Clear filters</Button>}
+        {loading && <Spinner text="Loading access summary..." />}
+        {error ? <ErrorState text={error} onRetry={load} /> : filtered.length === 0 && filtering ? <EmptyState text="No access summaries match these filters." /> : <AccessHistory rows={filtered} />}
+      </ScrollPanel>
+    );
   }
 
   return (
