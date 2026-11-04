@@ -7,6 +7,7 @@ ask for JSON output, so the UI can render sections and source chips.
 Note: on Gemini's free tier Google may use prompts to improve its
 products, so use demo data only; switch to a paid key for real patients.
 """
+import asyncio
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from supa import ROOT
 _env = dotenv_values(ROOT / ".env")
 MODEL = os.environ.get("MEDIS_LLM_MODEL") or _env.get("MEDIS_LLM_MODEL") or "gemini-3.8-flash"
 _client = None
+REQUEST_TIMEOUT_SECONDS = 45
 
 BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION", "OTHER"}
 
@@ -54,7 +56,12 @@ async def generate_json(system, messages, schema, *, effort):
         thinking_config=types.ThinkingConfig(thinking_level=effort.upper()),
     )
     try:
-        response = await client().aio.models.generate_content(model=MODEL, contents=contents, config=config)
+        response = await asyncio.wait_for(
+            client().aio.models.generate_content(model=MODEL, contents=contents, config=config),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except (TimeoutError, httpx.TimeoutException):
+        raise HTTPException(504, "Gemini took too long to respond. Please try generating the answer again in a moment.")
     except errors.APIError as exc:
         if exc.code in (401, 403) or (exc.code == 400 and "API key" in (exc.message or "")):
             raise HTTPException(503, "The Gemini API key is invalid. Check GEMINI_API_KEY in backend/.env.")
@@ -62,6 +69,8 @@ async def generate_json(system, messages, schema, *, effort):
             raise HTTPException(429, "The free AI quota is used up for now. Try again in a minute.")
         if exc.code == 404:
             raise HTTPException(503, f"Gemini model '{MODEL}' is not available. Set MEDIS_LLM_MODEL in backend/.env.")
+        if exc.code == 503:
+            raise HTTPException(503, "Gemini is temporarily unavailable or busy. Please try again in a moment.")
         if exc.code >= 500:
             raise HTTPException(502, f"AI service error ({exc.code}). Try again later.")
         raise HTTPException(502, f"AI request rejected: {exc.message}")
@@ -113,6 +122,8 @@ SUMMARY_SYSTEM = """You write a short longitudinal summary of one patient for th
 The input JSON comes from a deterministic screening engine (rule-based trends across finalized visits at every hospital) plus the patient's current medications, known conditions and recent final diagnoses.
 
 Rules:
+- Summarize available consultation notes, recorded diagnoses, medicines and readings even when there is only one consultation. An INSUFFICIENT_DATA trend status does not prevent a factual record summary. Do not use "insufficient data" as the summary or invent a trend from one reading. Describe what was recorded with its date; mention a specific limitation only when relevant to interpreting a finding.
+- Consultations with status pending are saved drafts: label them as not finalized and do not present their diagnoses or treatment entries as confirmed.
 - Use only facts and numbers present in the input. Do not calculate new numbers; restate the engine's values (first and latest values, change, percent change, dates).
 - Do not invent diagnoses, causes, prognoses, treatment orders or doses. You may point out what the doctor may want to review.
 - The review priority is the output of screening rules, not a probability or a diagnosis. Never express it as a percentage or risk score.

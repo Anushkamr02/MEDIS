@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 import llm
+from record_summary import summarize_records
 from adapters import consultations_to_visits, extracted_to_rows, compact_lead_samples
 from medis.ai.ascvd import calculate_pce
 from medis.ai.longitudinal_analysis import ENGINE_VERSION, assess_timeline
@@ -417,38 +418,45 @@ class SummaryRequest(BaseModel):
 @app.post("/ai/summary/{patient_id}")
 async def ai_summary(patient_id: str, body: SummaryRequest, ctx=Depends(current_doctor)):
     supa, user = ctx
-    patient = await require_patient_access(supa, patient_id)
-    params = {"select": "id,report", "patient_id": f"eq.{patient_id}", "order": "created_at.desc", "limit": "1"}
+    await require_patient_access(supa, patient_id)
+    params = {"select": "id", "patient_id": f"eq.{patient_id}", "order": "created_at.desc", "limit": "1"}
     if body.assessment_id:
         params["id"] = f"eq.{body.assessment_id}"
     assessments = await supa.select("cad_assessments", params)
-    if not assessments:
-        raise HTTPException(409, "Run the AI analysis first; the summary is written from its results.")
-    assessment = assessments[0]
+    if not assessments and body.assessment_id:
+        raise HTTPException(404, "The selected assessment was not found for this patient.")
+    assessment = assessments[0] if assessments else None
 
     details = (await supa.select("patient_profiles", {"select": "*", "id": f"eq.{patient_id}"}) or [{}])[0]
     medications = await supa.select("current_medications", {
         "select": "medicine_name,dosage,frequency,condition_name", "patient_id": f"eq.{patient_id}", "is_active": "eq.true"})
     visits = await supa.select("consultations", {
-        "select": "visit_id,consultation_date,final_diagnosis,hospitals(name)", "patient_id": f"eq.{patient_id}",
-        "status": "neq.pending", "final_diagnosis": "not.is.null", "order": "consultation_date.desc", "limit": "3"})
-    diagnoses = [{"visit_id": v["visit_id"], "date": (v["consultation_date"] or "")[:10],
-                  "hospital": (v.get("hospitals") or {}).get("name"), "diagnosis": v["final_diagnosis"]} for v in visits]
-
-    source = llm.summary_input(assessment["report"], patient, details, medications, diagnoses,
-                               age_from_dob(patient.get("date_of_birth")))
-    summary, model = await llm.generate_json(
-        llm.SUMMARY_SYSTEM,
-        [{"role": "user", "content": "Summarise this patient for the doctor.\n\n"
-                                     + json.dumps(source, sort_keys=True, default=str)}],
-        llm.SUMMARY_SCHEMA, effort="medium")
-    summary["unverified_numbers"] = llm.unverified_numbers(summary, source)
+        "select": "visit_id,consultation_date,status,final_diagnosis,complaints,observations,doctor_notes,follow_up_date,systolic_bp,diastolic_bp,"
+                  "heart_rate,bmi,total_cholesterol,ldl_cholesterol,hdl_cholesterol,triglycerides,fasting_glucose,hba1c,"
+                  "serum_creatinine,egfr,hospitals(name)", "patient_id": f"eq.{patient_id}",
+        "order": "consultation_date.desc"})
+    consultations = [{**{k: v for k, v in visit.items() if k not in ("hospitals", "final_diagnosis", "consultation_date")},
+                      "date": (visit.get("consultation_date") or "")[:10],
+                      "hospital": (visit.get("hospitals") or {}).get("name"),
+                      "diagnosis": visit.get("final_diagnosis")} for visit in visits]
+    source = {
+        "patient": {"known_conditions": details.get("known_conditions") or {}},
+        "recent_consultations": consultations,
+        "current_medications": [{"name": row.get("medicine_name")} for row in medications],
+    }
+    conditions = await supa.select("patient_medical_history", {
+        "select": "condition_name", "patient_id": f"eq.{patient_id}", "is_active": "eq.true"})
+    source["patient"]["recorded_conditions"] = [row["condition_name"] for row in conditions if row.get("condition_name")]
+    source["profile_bmi"] = details.get("bmi")
+    summary, model = summarize_records(source), "record-summary-v2"
 
     created_at = datetime.now(timezone.utc).isoformat()
-    await supa.update("cad_assessments", {"id": assessment["id"]},
-                      {"ai_summary": summary, "summary_model": model, "summary_created_at": created_at})
-    await audit(supa, user, "ai_summary", patient_id, {"assessment_id": assessment["id"], "model": model})
-    return {"assessment_id": assessment["id"], "ai_summary": summary, "summary_model": model,
+    if assessment:
+        await supa.update("cad_assessments", {"id": assessment["id"]},
+                          {"ai_summary": summary, "summary_model": model, "summary_created_at": created_at})
+    assessment_id = assessment["id"] if assessment else None
+    await audit(supa, user, "ai_summary", patient_id, {"assessment_id": assessment_id, "model": model})
+    return {"assessment_id": assessment_id, "ai_summary": summary, "summary_model": model,
             "summary_created_at": created_at}
 
 

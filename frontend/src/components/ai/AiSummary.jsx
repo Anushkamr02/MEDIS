@@ -1,150 +1,98 @@
-import { useState } from 'react';
-import { AlertTriangle, Copy, RefreshCw, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ClipboardList, Copy, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { aiRequest } from '../../lib/aiClient';
 import { formatDateTime } from '../../lib/format';
 import { Button } from '../ui';
 
-/**
- * AI-written summary of a saved assessment (POST /ai/summary, Gemini). It
- * is written only from the engine's numbers; any number the server could
- * not trace back to the input is listed so the doctor checks it.
- * `footer` is shown next to the actions (the share switch).
- */
-export default function AiSummary({ patientId, assessment, onSaved, onOpenVisit, footer }) {
+/** Brief clinical overview with the major recorded findings as bullet points. */
+export default function AiSummary({ patientId, assessment, onSaved, footer }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
-
+  const requested = useRef(null);
   const summary = assessment?.ai_summary;
-  const canGenerate = !!assessment?.id; // previews of unsaved visits aren't stored
+  const paragraph = summary?.format === 'clinical-highlights-v1' ? summary.overview : '';
+  const keyPoints = paragraph ? summary.key_points ?? [] : [];
+  const canGenerate = !!patientId && !assessment?.preview;
+  const assessmentId = assessment?.id ?? null;
 
-  async function generate() {
+  const generate = useCallback(async () => {
     setError('');
     setRunning(true);
-    const { data, error: summaryError } = await aiRequest(`/ai/summary/${patientId}`, {
-      body: { assessment_id: assessment.id },
-    });
-    setRunning(false);
-    if (summaryError) setError(summaryError);
-    else onSaved(data);
+    try {
+      const { data, error: summaryError } = await aiRequest(`/ai/summary/${patientId}`, {
+        body: { assessment_id: assessmentId },
+      });
+      if (summaryError) setError(summaryError);
+      else onSaved(data);
+    } catch {
+      setError('Could not refresh the clinical summary. Please try again.');
+    } finally {
+      setRunning(false);
+    }
+  }, [patientId, assessmentId, onSaved]);
+
+  useEffect(() => {
+    const key = `${patientId}:${assessmentId ?? 'records'}`;
+    if (!canGenerate || requested.current === key) return;
+    requested.current = key;
+    generate();
+  }, [canGenerate, patientId, assessmentId, generate]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText([paragraph, ...keyPoints.map((point) => `- ${point}`)].join('\n'));
+      toast.success('Summary copied');
+    } catch {
+      toast.error('Could not copy the summary.');
+    }
   }
-
-  function copy() {
-    const text = [
-      summary.overview,
-      ...summary.changes.map((c) => `• ${c.text}`),
-      ...summary.review_points.map((p) => `• Review: ${p}`),
-      ...summary.data_gaps.map((g) => `• Data gap: ${g}`),
-    ].join('\n');
-    navigator.clipboard?.writeText(text);
-    toast.success('Summary copied');
-  }
-
-  const chip = (id) => (
-    <button
-      key={id}
-      type="button"
-      onClick={() => onOpenVisit?.(id)}
-      className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] hover:border-primary hover:text-primary"
-    >
-      {id}
-    </button>
-  );
-
-  const heading = (text) => <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{text}</h4>;
 
   return (
-    <div className="rounded-lg border p-3">
-      <h3 className="text-sm font-semibold">AI summary</h3>
-      {error && <p className="mt-2 rounded-md bg-destructive-soft px-3 py-2 text-sm text-destructive">{error}</p>}
-      {running ? (
-        <div className="mt-2 space-y-2">
-          {[90, 75, 85].map((w) => (
-            <div key={w} className="h-3 animate-pulse rounded bg-muted" style={{ width: `${w}%` }} />
-          ))}
-        </div>
-      ) : !summary ? (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-muted-foreground">
-            {canGenerate
-              ? 'Write a plain-language summary of this analysis for review.'
-              : 'This is an unsaved preview. Save or finalize the visit and refresh the analysis to summarise it.'}
-          </p>
-          {canGenerate && (
-            <Button size="sm" variant="outline" className="border-ai/30 text-ai hover:bg-ai-soft" onClick={generate}>
-              <Sparkles className="h-3.5 w-3.5" />
-              Generate summary
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="mt-2 space-y-3 text-sm">
-          <div>
-            {heading('Overview')}
-            <p>{summary.overview}</p>
-          </div>
-          {summary.changes.length > 0 && (
-            <div>
-              {heading('What changed')}
-              <ul className="list-disc space-y-1 pl-5">
-                {summary.changes.map((c, i) => (
-                  <li key={i}>
-                    {c.text} <span className="ml-1 inline-flex flex-wrap gap-1">{c.visit_ids.map(chip)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {summary.review_points.length > 0 && (
-            <div>
-              {heading('Points to review')}
-              <ul className="list-disc space-y-1 pl-5">
-                {summary.review_points.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {summary.data_gaps.length > 0 && (
-            <div>
-              {heading('Data gaps')}
-              <ul className="list-disc space-y-1 pl-5">
-                {summary.data_gaps.map((g) => (
-                  <li key={g}>{g}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {summary.unverified_numbers?.length > 0 && (
-            <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              Check these numbers against the trend data; they couldn't be matched to the analysis: {summary.unverified_numbers.join(', ')}
-            </p>
-          )}
-        </div>
-      )}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
-        <p className="text-[11px] text-muted-foreground">
-          {summary
-            ? `AI-generated from structured visit data · Model: ${assessment.summary_model ?? '—'}${assessment.summary_created_at ? ` · ${formatDateTime(assessment.summary_created_at)}` : ''}`
-            : 'The summary is written by an AI model only from the analysis numbers.'}
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          {summary && (
-            <>
-              <Button size="sm" variant="ghost" onClick={generate} disabled={running}>
-                <RefreshCw className="h-3.5 w-3.5" />
-                Regenerate
-              </Button>
-              <Button size="sm" variant="ghost" onClick={copy}>
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </Button>
-            </>
-          )}
-          {footer}
+    <section aria-label="Patient record summary" aria-busy={running}
+      className="rounded-xl border border-primary/15 bg-card p-4 shadow-sm sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground sm:text-base">
+          <ClipboardList className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          Patient record summary
+        </h3>
+        <div className="flex items-center gap-1">
+          {canGenerate && <Button type="button" size="sm" variant="ghost" onClick={generate} disabled={running} aria-label="Refresh summary">
+            <RefreshCw className={`h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>}
+          {paragraph && <Button type="button" size="sm" variant="ghost" onClick={copy} disabled={running} aria-label="Copy summary">
+            <Copy className="h-3.5 w-3.5" />
+          </Button>}
         </div>
       </div>
-    </div>
+      <div className="mt-3" aria-live="polite">
+        {running && !paragraph ? (
+          <div className="space-y-2" role="status" aria-label="Preparing clinical summary">
+            {[100, 95, 75].map((width) => <div key={width} className="h-3 animate-pulse rounded bg-muted" style={{ width: `${width}%` }} />)}
+          </div>
+        ) : paragraph ? (
+          <div className="space-y-3">
+            <p className="max-w-prose break-words text-sm leading-7 text-foreground/90 sm:max-w-none">{paragraph}</p>
+            {keyPoints.length > 0 && (
+              <ul aria-label="Key clinical findings" className="list-disc space-y-2 pl-5 text-sm leading-6 text-foreground/90 marker:text-primary">
+                {keyPoints.map((point) => <li key={point} className="break-words pl-1">{point}</li>)}
+              </ul>
+            )}
+          </div>
+        ) : !error ? (
+          <p className="text-sm leading-6 text-muted-foreground">
+            {canGenerate ? 'Preparing a summary of the available records.' : 'Save the consultation to summarize its recorded findings.'}
+          </p>
+        ) : null}
+        {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
+        <span className="text-xs text-muted-foreground">
+          Based on saved clinical records{assessment?.summary_created_at ? ` - Updated ${formatDateTime(assessment.summary_created_at)}` : ''}
+        </span>
+        {footer}
+      </div>
+    </section>
   );
 }

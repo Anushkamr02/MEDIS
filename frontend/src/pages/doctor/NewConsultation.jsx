@@ -235,6 +235,7 @@ export default function NewConsultation() {
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [prescriptionEditing, setPrescriptionEditing] = useState(false);
 
   const { profile: patient, details, medications, history, hospitals } = usePatientRecord(
     consultation?.patient_id
@@ -419,6 +420,10 @@ export default function NewConsultation() {
   // Finalizing asks for confirmation first (dialog), then calls save(true, true)
   async function save(finalize = false, confirmed = false) {
     setSaveError('');
+    if (finalize && prescriptionEditing) {
+      setSaveError('Save or cancel prescription changes before finalizing.');
+      return;
+    }
     if (!formRef.current?.reportValidity()) return;
 
     if (finalize) {
@@ -788,6 +793,9 @@ export default function NewConsultation() {
               doctorId={user.id}
               prescriptions={prescriptions}
               canIssue={isOwner}
+              canEdit={!readOnly && !consultation.finalized_at}
+              disabled={saving}
+              onEditingChange={setPrescriptionEditing}
               startOpen={location.state?.focus === 'prescription'}
               onSaved={loadPrescriptions}
             />
@@ -839,10 +847,11 @@ export default function NewConsultation() {
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 Save draft
               </Button>
-              <Button onClick={() => save(true)} disabled={saving}>
+              <Button onClick={() => save(true)} disabled={saving || prescriptionEditing}>
                 Finalize consultation
               </Button>
             </div>
+            {prescriptionEditing && <p className="w-full text-xs text-muted-foreground">Save or cancel prescription changes before finalizing.</p>}
           </div>
         </div>
       )}
@@ -857,7 +866,7 @@ export default function NewConsultation() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={() => save(true, true)}>Finalize</AlertDialogAction>
+            <AlertDialogAction disabled={saving || prescriptionEditing} onClick={() => save(true, true)}>Finalize</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

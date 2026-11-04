@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Pencil, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabaseClient';
 import { Button, Input, SimpleSelect, Textarea } from './ui';
 import { EmptyState } from './medis';
 import { PrescriptionCard } from './ai/PrescriptionPdfButton';
+import { prescriptionMedicines, prescriptionRows } from '../lib/prescriptionDraft';
 
 const TIMING_OPTIONS = ['After food', 'Before food', 'With food', 'Empty stomach', 'At bedtime', 'As needed'];
 
@@ -24,11 +25,8 @@ function emptyRow() {
 }
 
 /**
- * Lists the prescriptions already issued for one consultation and lets
- * the doctor issue a new one. There is deliberately no edit/delete:
- * prescriptions are never overwritten — to change medication, the
- * doctor issues a new prescription. Inserting one fires the
- * notify_prescription_added trigger, so the patient is notified.
+ * Issue prescriptions and edit existing prescriptions before finalization.
+ * Edits use a guarded database function and retain the original prescription ID.
  */
 export default function PrescriptionForm({
   consultationId,
@@ -36,6 +34,9 @@ export default function PrescriptionForm({
   doctorId,
   prescriptions,
   canIssue = true,
+  canEdit = false,
+  disabled = false,
+  onEditingChange,
   onSaved,
   startOpen = false,
 }) {
@@ -44,6 +45,20 @@ export default function PrescriptionForm({
   const [instructions, setInstructions] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+
+  useEffect(() => {
+    onEditingChange?.(showForm);
+  }, [showForm, onEditingChange]);
+
+  function editPrescription(prescription) {
+    setEditingId(prescription.id);
+    const medicines = prescriptionRows(prescription);
+    setRows(medicines.length ? medicines : [emptyRow()]);
+    setInstructions(prescription.instructions ?? '');
+    setError('');
+    setShowForm(true);
+  }
 
   function updateRow(index, field, value) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
@@ -62,72 +77,81 @@ export default function PrescriptionForm({
     setInstructions('');
     setError('');
     setShowForm(false);
+    setEditingId(null);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (saving || disabled || (editingId ? !canEdit : !canIssue)) return;
     setError('');
 
-    const filled = rows.filter((r) => r.name.trim() !== '');
-    if (filled.length === 0) {
-      setError('Add at least one medicine.');
-      return;
-    }
-    const incomplete = filled.find((r) => !r.dosage.trim() || !r.frequency.trim() || !r.duration_days);
-    if (incomplete) {
-      setError(`Fill in dosage, frequency and duration for ${incomplete.name}.`);
+    let medicines;
+    try {
+      medicines = prescriptionMedicines(rows);
+    } catch (validationError) {
+      setError(validationError.message);
       return;
     }
 
     // `duration` stays a display string because the patient dashboard
     // already renders it; `duration_days` keeps the number for later use.
-    const medicines = filled.map((r) => ({
-      name: r.name.trim(),
-      dosage: r.dosage.trim(),
-      frequency: r.frequency.trim(),
-      duration: `${r.duration_days} days`,
-      duration_days: Number(r.duration_days),
-      timing: r.timing,
-      notes: r.notes.trim() || null,
-    }));
-
     setSaving(true);
-    const { error: insertError } = await supabase.from('prescriptions').insert({
-      consultation_id: consultationId,
-      patient_id: patientId,
-      doctor_id: doctorId,
-      medicines,
-      instructions: instructions.trim() || null,
-    });
-    setSaving(false);
+    try {
+      const request = editingId
+        ? supabase.rpc('update_draft_prescription', {
+            p_prescription_id: editingId,
+            p_consultation_id: consultationId,
+            p_medicines: medicines,
+            p_instructions: instructions.trim() || null,
+          }).single()
+        : supabase.from('prescriptions').insert({
+        consultation_id: consultationId,
+        patient_id: patientId,
+        doctor_id: doctorId,
+        medicines,
+        instructions: instructions.trim() || null,
+      });
+      const { error: insertError } = await request;
 
-    if (insertError) {
-      setError(insertError.message);
-      return;
+      if (insertError) {
+        setError(insertError.message);
+        return;
+      }
+
+      await supabase.from('audit_logs').insert({
+        user_id: doctorId,
+        action: editingId ? 'edited_prescription' : 'added_prescription',
+        target_id: consultationId,
+        target_type: 'consultation',
+        metadata: { prescription_id: editingId, medicine_count: medicines.length },
+      });
+
+      toast.success(editingId ? 'Prescription updated' : 'Prescription issued');
+      await onSaved?.();
+      resetForm();
+    } catch (saveFailure) {
+      setError(saveFailure.message || 'Could not save the prescription. Please try again.');
+    } finally {
+      setSaving(false);
     }
-
-    await supabase.from('audit_logs').insert({
-      user_id: doctorId,
-      action: 'added_prescription',
-      target_id: consultationId,
-      target_type: 'consultation',
-      metadata: { medicine_count: medicines.length },
-    });
-
-    resetForm();
-    toast.success('Prescription issued');
-    onSaved?.();
   }
 
   return (
     <div className="space-y-2">
       {prescriptions.length === 0 && !showForm && <EmptyState text="No prescriptions issued for this visit." />}
       {prescriptions.map((p) => (
-        <PrescriptionCard key={p.id} rx={p} />
+        <div key={p.id} className="space-y-1">
+          <PrescriptionCard rx={p} editable={canEdit && p.doctor_id === doctorId} />
+          {canEdit && p.doctor_id === doctorId && (
+            <Button type="button" size="sm" variant="outline" disabled={showForm || saving || disabled} onClick={() => editPrescription(p)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit prescription
+            </Button>
+          )}
+        </div>
       ))}
 
       {canIssue && !showForm && (
-        <Button size="sm" onClick={() => setShowForm(true)}>
+        <Button type="button" size="sm" disabled={disabled} onClick={() => setShowForm(true)}>
           <Plus className="h-4 w-4" />
           Write prescription
         </Button>
@@ -135,70 +159,76 @@ export default function PrescriptionForm({
 
       {canIssue && showForm && (
         <form onSubmit={handleSubmit} className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3">
-          <div className="hidden grid-cols-[repeat(6,1fr)_auto] gap-2 px-0.5 text-xs text-muted-foreground sm:grid">
-            <span>Medicine</span>
-            <span>Dosage</span>
-            <span>Frequency</span>
-            <span>Days</span>
-            <span>Timing</span>
-            <span>Notes</span>
-            <span className="w-9" />
-          </div>
-          {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(6,1fr)_auto]">
-              <Input aria-label="Medicine" placeholder="e.g. Atorvastatin" value={r.name} onChange={(e) => updateRow(i, 'name', e.target.value)} />
-              <Input aria-label="Dosage" placeholder="10 mg" value={r.dosage} onChange={(e) => updateRow(i, 'dosage', e.target.value)} />
-              <Input
-                aria-label="Frequency"
-                placeholder="1-0-1"
-                list="rx-frequency-options"
-                value={r.frequency}
-                onChange={(e) => updateRow(i, 'frequency', e.target.value)}
-              />
-              <Input
-                aria-label="Days"
-                type="number"
-                min="1"
-                max="365"
-                placeholder="Days"
-                value={r.duration_days}
-                onChange={(e) => updateRow(i, 'duration_days', e.target.value)}
-              />
-              <SimpleSelect ariaLabel="Timing" value={r.timing} onChange={(v) => updateRow(i, 'timing', v)} options={TIMING_OPTIONS} />
-              <Input aria-label="Notes" placeholder="Notes" value={r.notes} onChange={(e) => updateRow(i, 'notes', e.target.value)} />
-              <Button type="button" variant="ghost" size="icon" aria-label="Remove medicine" onClick={() => removeRow(i)} disabled={rows.length === 1}>
-                <X className="h-4 w-4" />
+          <fieldset disabled={saving || disabled} className="space-y-2">
+            <h4 className="text-sm font-semibold">{editingId ? 'Edit prescription' : 'New prescription'}</h4>
+            <div className="hidden grid-cols-[repeat(6,1fr)_auto] gap-2 px-0.5 text-xs text-muted-foreground sm:grid">
+              <span>Medicine</span>
+              <span>Dosage</span>
+              <span>Frequency</span>
+              <span>Days</span>
+              <span>Timing</span>
+              <span>Notes</span>
+              <span className="w-9" />
+            </div>
+            {rows.map((r, i) => (
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(6,1fr)_auto]">
+                <Input aria-label="Medicine" placeholder="e.g. Atorvastatin" value={r.name} onChange={(e) => updateRow(i, 'name', e.target.value)} />
+                <Input aria-label="Dosage" placeholder="10 mg" value={r.dosage} onChange={(e) => updateRow(i, 'dosage', e.target.value)} />
+                <Input
+                  aria-label="Frequency"
+                  placeholder="1-0-1"
+                  list="rx-frequency-options"
+                  value={r.frequency}
+                  onChange={(e) => updateRow(i, 'frequency', e.target.value)}
+                />
+                <Input
+                  aria-label="Days"
+                  type="number"
+                  min="1"
+                  max="365"
+                  placeholder="Days"
+                  value={r.duration_days}
+                  onChange={(e) => updateRow(i, 'duration_days', e.target.value)}
+                />
+                <SimpleSelect ariaLabel="Timing" value={r.timing} onChange={(v) => updateRow(i, 'timing', v)} options={TIMING_OPTIONS} />
+                <Input aria-label="Notes" placeholder="Notes" value={r.notes} onChange={(e) => updateRow(i, 'notes', e.target.value)} />
+                <Button type="button" variant="ghost" size="icon" aria-label="Remove medicine" onClick={() => removeRow(i)} disabled={rows.length === 1}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <datalist id="rx-frequency-options">
+              {FREQUENCY_SUGGESTIONS.map((f) => (
+                <option key={f} value={f} />
+              ))}
+            </datalist>
+            <Button type="button" size="sm" variant="outline" onClick={addRow}>
+              <Plus className="h-4 w-4" />
+              Add medicine
+            </Button>
+            <Textarea
+              aria-label="Prescription instructions"
+              placeholder="General instructions, e.g. low-salt diet, walk 30 minutes daily, review lipid profile in 3 months"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+            />
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Saving...' : editingId ? 'Save prescription changes' : 'Issue prescription'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={resetForm} disabled={saving}>
+                Cancel
               </Button>
             </div>
-          ))}
-          <datalist id="rx-frequency-options">
-            {FREQUENCY_SUGGESTIONS.map((f) => (
-              <option key={f} value={f} />
-            ))}
-          </datalist>
-          <Button type="button" size="sm" variant="outline" onClick={addRow}>
-            <Plus className="h-4 w-4" />
-            Add medicine
-          </Button>
-          <Textarea
-            placeholder="General instructions, e.g. low-salt diet, walk 30 minutes daily, review lipid profile in 3 months"
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-          />
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
+            <p className="text-xs text-muted-foreground">
+              {canEdit ? 'You can edit this visit\'s prescriptions until the consultation is finalized.' : 'Finalized prescriptions cannot be edited. Issue a new prescription to change treatment.'}
             </p>
-          )}
-          <div className="flex gap-2">
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Issuing...' : 'Issue prescription'}
-            </Button>
-            <Button type="button" variant="ghost" onClick={resetForm} disabled={saving}>
-              Cancel
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">Prescriptions can't be edited after they are issued. To change medication, issue a new one.</p>
+          </fieldset>
         </form>
       )}
     </div>

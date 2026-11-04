@@ -176,7 +176,16 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
         ) : running ? (
           <Spinner text="Analysing visits…" />
         ) : !report ? (
-          <EmptyState text="No assessment yet. Run an analysis to see how BP, lipids and glucose change across this patient's finalized visits at every hospital." />
+          <div className="space-y-3">
+            <AiSummary
+              key={patientId}
+              patientId={patientId}
+              assessment={assessment}
+              onSaved={(saved) => setAssessment((prev) => ({ ...prev, ...saved }))}
+              onOpenVisit={onOpenVisit}
+            />
+            <EmptyState text="Run an analysis to review trends across this patient's finalized visits." />
+          </div>
         ) : (
           <>
             <div className="rounded-lg bg-muted/50 p-3">

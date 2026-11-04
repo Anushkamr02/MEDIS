@@ -28,7 +28,7 @@ export default function PrescriptionPdfButton({ prescriptionId, path, label = 'D
 }
 
 /** One issued prescription (rows from public.prescriptions). */
-export function PrescriptionCard({ rx, visitId }) {
+export function PrescriptionCard({ rx, visitId, editable = false }) {
   return (
     <article id={`rx-${rx.id}`} className="scroll-mt-24 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -44,8 +44,8 @@ export function PrescriptionCard({ rx, visitId }) {
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Lock className="h-3 w-3" />
-            Issued
+            {!editable && <Lock className="h-3 w-3" />}
+            {editable ? 'Editable until finalized' : 'Issued'}
           </span>
           <PrescriptionPdfButton prescriptionId={rx.id} />
         </div>
