@@ -71,16 +71,20 @@ export default function DoctorLayout() {
     loadNotifications();
   }, [loadDoctorProfile, loadNotifications]);
 
-  // Drafts badge: refreshed on every navigation (a draft may have just been finalized)
-  useEffect(() => {
+  const refreshDraftCount = useCallback(() => {
     if (!profile?.id) return;
-    supabase
+    return supabase
       .from('consultations')
       .select('id', { count: 'exact', head: true })
       .eq('doctor_id', profile.id)
       .eq('status', 'pending')
       .then(({ count }) => setDraftCount(count ?? 0));
-  }, [profile?.id, location.pathname]);
+  }, [profile?.id]);
+
+  // Refresh after navigation and let the drafts page refresh after deletion.
+  useEffect(() => {
+    refreshDraftCount();
+  }, [refreshDraftCount, location.pathname]);
 
   async function markRead(id) {
     await supabase.from('notifications').update({ is_read: true }).eq('id', id);
@@ -161,7 +165,7 @@ export default function DoctorLayout() {
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
-          <Outlet context={{ doctorProfile, hospitalName, reloadDoctorProfile: loadDoctorProfile }} />
+          <Outlet context={{ doctorProfile, hospitalName, reloadDoctorProfile: loadDoctorProfile, refreshDraftCount }} />
         </main>
       </div>
     </div>

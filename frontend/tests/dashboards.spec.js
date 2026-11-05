@@ -26,6 +26,29 @@ function panelBody(page, title) {
 // Doctor record: tabs and the constrained Visit History panel
 // ----------------------------------------------------------------
 
+test('the AI check badge opens its review reason and evidence in Patient Overview', async ({ page }) => {
+  const state = await mockApp(page);
+  state.assessment.report.overall_assessment = 'Blood pressure has increased across recorded visits.';
+  state.assessment.report.clinical_flags = [{
+    metric: 'systolic_bp', severity: 'REVIEW', message: 'Systolic blood pressure increased to 140 mmHg.',
+    evidence: [{ visit_id: 'MEDIS-V-000002', date: '2026-01-10', value: 120 }],
+  }];
+  state.assessment.report.recommendations = ['Review repeat blood pressure measurements.'];
+  await page.goto('/doctor/patients');
+  const review = page.getByRole('link', { name: 'Review AI check for Test Patient: Needs review', exact: true });
+  await expect(review).toBeVisible();
+  await review.click();
+  await expect(page).toHaveURL(`/doctor/patients/${PATIENT}?review=ai#ai-review`);
+  await expect(page.getByRole('tab', { name: 'Patient Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#ai-review')).toBeFocused();
+  await expect(page.locator('#ai-review')).toContainText('Blood pressure has increased across recorded visits.');
+  await expect(page.locator('#ai-review')).toContainText('Systolic blood pressure increased to 140 mmHg.');
+  await page.getByRole('button', { name: 'Show evidence' }).click();
+  await expect(page.locator('#ai-review').getByRole('button', { name: 'MEDIS-V-000002', exact: true })).toBeVisible();
+  await expect(page.getByText('Review repeat blood pressure measurements.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh analysis', exact: true })).toBeVisible();
+});
+
 test('the doctor patient record has the five record sections and keeps direct links', async ({ page }) => {
   await mockApp(page);
   await page.goto(`/doctor/patients/${PATIENT}`);
@@ -36,6 +59,26 @@ test('the doctor patient record has the five record sections and keeps direct li
   }
   await expect(tabs.getByRole('tab', { name: 'Patient Overview' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('heading', { name: 'Vitals & lifestyle' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Latest ECG analysis', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Trends', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Findings to review', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Digital ECG files')).toHaveCount(0);
+
+  await tabs.getByRole('tab', { name: 'ECG Analysis', exact: true }).click();
+  await expect(page).toHaveURL(/tab=ecg/);
+  await expect(page.getByRole('heading', { name: 'Latest ECG analysis', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Trends', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Findings to review', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Digital ECG files')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Available ECG reports', exact: true })).toBeVisible();
+  await noPageOverflow(page);
+
+  await page.reload();
+  await expect(tabs.getByRole('tab', { name: 'ECG Analysis', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('heading', { name: 'Trends', exact: true })).toHaveCount(0);
+  await tabs.getByRole('tab', { name: 'Patient Overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Trends', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Latest ECG analysis', exact: true })).toHaveCount(0);
 
   await tabs.getByRole('tab', { name: 'Visit History' }).click();
   await expect(page).toHaveURL(/tab=visits/);

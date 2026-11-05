@@ -144,7 +144,7 @@ test('six patient tabs replace content, retain direct links, and support keyboar
 test('sticky layers remain opaque and accessible after scrolling', async ({ page }, testInfo) => {
   await mockApp(page);
   await page.goto(`/doctor/patients/${PATIENT}`);
-  await expect(page.getByRole('heading', { name: 'AI Insights', exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vitals & lifestyle', exact: true })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 500));
   const layers = await page.evaluate(() => {
     const header = document.querySelector('.app-header');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ChevronDown, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { aiRequest } from '../../lib/aiClient';
@@ -7,7 +7,6 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { AIBadge, AIDisclaimer, EmptyState, PriorityPill, ServiceUnavailable, Spinner } from '../medis';
 import { METRIC_INFO, TrendCharts } from './TrendChart';
-import EcgResult from './EcgResult';
 import AiSummary from './AiSummary';
 import DigitalEcgUpload from './DigitalEcgUpload';
 import ShareAssessment from './ShareAssessment';
@@ -68,29 +67,39 @@ function Flags({ flags, chip }) {
 
 /**
  * Longitudinal CAD screening from the teammate's engine (via the AI
- * service): review priority, AI summary, trend graphs, findings and
- * recent ECG analyses. Shown on the patient profile and,
+ * service): review priority, AI summary, trend graphs and findings.
+ * Shown in the patient record's Patient Overview section and,
  * compact, on the consultation page, where getDraftValues lets the doctor
  * preview how the unsaved visit changes the trend (previews are not saved).
  */
-export default function AiInsights({ patientId, consultationId, getDraftValues, compact = false, onOpenVisit }) {
+export default function AiInsights({ patientId, consultationId, getDraftValues, compact = false, onOpenVisit, reviewRequested = false }) {
   const [assessment, setAssessment] = useState(null); // cad_assessments row (+ preview flag)
-  const [ecgRows, setEcgRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [full, setFull] = useState(!compact);
+  const reviewRef = useRef(null);
+  const reviewFocused = useRef(false);
+
+  useEffect(() => {
+    reviewFocused.current = false;
+    if (reviewRequested) setFull(true);
+  }, [patientId, reviewRequested]);
+
+  useEffect(() => {
+    if (!reviewRequested || loading || running || !reviewRef.current || reviewFocused.current) return;
+    reviewRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    reviewRef.current.focus({ preventScroll: true });
+    reviewFocused.current = true;
+  }, [reviewRequested, loading, running, assessment, full]);
 
   const load = useCallback(async () => {
     if (!patientId) return;
     setLoading(true);
-    const [{ data: rows, error: loadError }, { data: ecgs }] = await Promise.all([
-      supabase.from('cad_assessments').select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(1),
-      supabase.from('ecg_analyses').select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(3),
-    ]);
+    const { data: rows, error: loadError } = await supabase.from('cad_assessments').select('*')
+      .eq('patient_id', patientId).order('created_at', { ascending: false }).limit(1);
     if (loadError) setError(loadError.message);
     setAssessment(rows?.[0] ?? null);
-    setEcgRows(ecgs ?? []);
     setLoading(false);
   }, [patientId]);
 
@@ -128,7 +137,6 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
   const hospitals = new Set(
     Object.values(trajectories).flatMap((m) => (m.points ?? []).flatMap((p) => (p.evidence ?? []).map((e) => e.hospital).filter(Boolean)))
   ).size;
-  const latestEcg = ecgRows[0];
 
   const chip = (id) => (
     <button
@@ -231,7 +239,13 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
                   <h3 className="mb-2 text-sm font-semibold">Trends</h3>
                   <TrendCharts trajectories={trajectories} compact={compact} />
                 </div>
-                <Flags flags={report.clinical_flags ?? []} chip={chip} />
+                <div id="ai-review" ref={reviewRef} tabIndex={-1} className="scroll-mt-24 rounded-lg focus-visible:outline-2 focus-visible:outline-ring">
+                  <p className="mb-2 text-sm text-muted-foreground">
+                    {report.overall_assessment || 'Review the recorded findings and their evidence below.'}
+                    {' '}This screening uses saved visit measurements and trends. Review the evidence and suggested review points before deciding on follow-up.
+                  </p>
+                  <Flags flags={report.clinical_flags ?? []} chip={chip} />
+                </div>
                 {!compact && report.recommendations?.length > 0 && (
                   <div className="rounded-lg border p-3">
                     <h3 className="mb-2 text-sm font-semibold">Suggested review points</h3>
@@ -265,41 +279,14 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
           </>
         )}
 
-        {(full || compact || !report) && (
+        {compact && (
           <div>
             <div className="space-y-3 rounded-lg border p-3">
               <h3 className="flex items-center gap-2 text-sm font-semibold">
                 <Activity className="h-4 w-4 text-ai" />
-                {compact ? 'Digital ECG recording' : 'Latest ECG analysis'}
+                Digital ECG recording
               </h3>
-              {!compact &&
-                (latestEcg ? (
-                  <EcgResult
-                    status={latestEcg.status}
-                    classification={latestEcg.classification}
-                    result={latestEcg.result}
-                    fileName={latestEcg.file_name}
-                    createdAt={latestEcg.created_at}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No ECG analysed yet. Use <b>Analyse ECG (AI)</b> on an ECG in Medical documents below, or upload a digital recording.
-                  </p>
-                ))}
-              {!compact && ecgRows.length > 1 && (
-                <details className="text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-medium">Earlier ECG analyses ({ecgRows.length - 1})</summary>
-                  <div className="mt-2 space-y-3">
-                    {ecgRows.slice(1).map((r) => (
-                      <div key={r.id} className="rounded-md border p-2">
-                        <EcgResult status={r.status} classification={r.classification} result={r.result} fileName={r.file_name} createdAt={r.created_at} />
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-              <div className={cn(!compact && 'border-t pt-3')}>
-                {!compact && <p className="mb-2 text-xs font-medium">Upload a digital ECG recording</p>}
+              <div>
                 <DigitalEcgUpload patientId={patientId} consultationId={consultationId} onSaved={load} />
               </div>
             </div>

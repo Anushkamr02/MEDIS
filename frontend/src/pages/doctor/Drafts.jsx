@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { formatDateTime } from '../../lib/format';
-import { Button } from '../../components/ui';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, Button } from '../../components/ui';
 import { EmptyState, ErrorState, IDChip, Section, Spinner } from '../../components/medis';
 
 /**
@@ -12,9 +13,31 @@ import { EmptyState, ErrorState, IDChip, Section, Spinner } from '../../componen
  */
 export default function Drafts() {
   const { user } = useAuth();
+  const { refreshDraftCount } = useOutletContext();
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
+  const [selectedDraft, setSelectedDraft] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+
+  async function deleteDraft(draft) {
+    if (deletingId) return;
+    setDeletingId(draft.id);
+    setDeleteError('');
+    try {
+      const { error: deleteError } = await supabase.rpc('delete_own_draft', { p_consultation_id: draft.id });
+      if (deleteError) throw deleteError;
+      setDrafts((previous) => previous.filter((d) => d.id !== draft.id));
+      setSelectedDraft(null);
+      refreshDraftCount();
+      toast.success('Draft deleted');
+    } catch (err) {
+      setDeleteError(err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   useEffect(() => {
     if (!user?.id) return;
@@ -43,7 +66,7 @@ export default function Drafts() {
         {loading ? (
           <Spinner text="Loading drafts..." />
         ) : drafts.length === 0 ? (
-          <EmptyState text="No drafts. Every consultation is finalized." />
+          <EmptyState text="No unfinished drafts." />
         ) : (
           <ul className="divide-y">
             {drafts.map((d) => (
@@ -56,14 +79,32 @@ export default function Drafts() {
                   </p>
                 </div>
                 <IDChip id={d.visit_id} />
-                <Button size="sm" asChild>
+                {deletingId === d.id ? <Button size="sm" disabled>Resume</Button> : <Button size="sm" asChild>
                   <Link to={`/doctor/consultations/${d.id}`}>Resume</Link>
+                </Button>}
+                <Button size="sm" variant="destructive" aria-label="Delete draft" disabled={!!deletingId} onClick={() => { setDeleteError(''); setSelectedDraft(d); }}>
+                  {deletingId === d.id ? 'Deleting...' : 'Delete'}
                 </Button>
               </li>
             ))}
           </ul>
         )}
       </Section>
+      <AlertDialog open={!!selectedDraft} onOpenChange={(open) => { if (!open && !deletingId) setSelectedDraft(null); }}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Delete draft?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Delete {selectedDraft?.visit_id} for {selectedDraft?.profiles?.full_name ?? 'this patient'} and its draft prescriptions? This action cannot be undone.
+          </AlertDialogDescription>
+          {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+          <AlertDialogFooter>
+            <Button variant="outline" disabled={!!deletingId} onClick={() => setSelectedDraft(null)}>Keep draft</Button>
+            <Button variant="destructive" disabled={!!deletingId} onClick={() => deleteDraft(selectedDraft)}>
+              {deletingId ? 'Deleting...' : 'Delete draft'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

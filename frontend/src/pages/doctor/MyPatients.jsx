@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, Search } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { openPatientRecord } from '../../lib/patientAccess';
@@ -192,7 +192,7 @@ export default function MyPatients() {
                       tabIndex={0}
                       className="cursor-pointer transition-colors hover:bg-muted/60 focus:bg-muted/60"
                       onClick={() => open(p)}
-                      onKeyDown={(e) => e.key === 'Enter' && open(p)}
+                      onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && open(p)}
                     >
                       <td className="py-2.5 font-medium">{p.profiles?.full_name || 'Unnamed patient'}</td>
                       <td>
@@ -205,7 +205,15 @@ export default function MyPatients() {
                       <td>
                         {assessment ? (
                           <div>
-                            <PriorityPill value={assessment.review_priority} />
+                            <Link
+                              to={`/doctor/patients/${p.patient_id}?review=ai#ai-review`}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Review AI check for ${p.profiles?.full_name || 'patient'}: ${priorityInfo(assessment.review_priority).label}`}
+                              className="inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring hover:opacity-80"
+                            >
+                              <PriorityPill value={assessment.review_priority} />
+                            </Link>
+                            <p className="mt-0.5 text-[10px] text-primary">View reason &amp; review</p>
                             <p className="mt-0.5 text-[10px] text-muted-foreground">Analysed {formatDate(assessment.created_at)}</p>
                           </div>
                         ) : (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabaseClient';
@@ -29,6 +29,7 @@ function emptyMedication() {
 export default function Onboarding() {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
+  const { refresh } = useOutletContext();
 
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth ?? '');
@@ -114,7 +115,7 @@ export default function Onboarding() {
       setError('Name, date of birth and gender are required.');
       return;
     }
-    if (medications.some((m) => !m.medicine_name.trim())) {
+    if (medications.some((m) => Object.values(m).some((value) => value.trim()) && !m.medicine_name.trim())) {
       setError('Each new medication needs a name.');
       return;
     }
@@ -173,6 +174,7 @@ export default function Onboarding() {
     }
 
     await refreshProfile();
+    await refresh();
     setSubmitting(false);
     toast.success('Profile saved');
     navigate(isEditing ? '/patient/profile' : '/patient');
@@ -235,7 +237,7 @@ export default function Onboarding() {
         </div>
       </Section>
       <Section
-        title="Current medications"
+        title="Current medications (optional)"
         action={
           <Button type="button" size="sm" variant="outline" onClick={addMedicationRow}>
             <Plus className="h-4 w-4" />
@@ -243,6 +245,7 @@ export default function Onboarding() {
           </Button>
         }
       >
+        <p className="mb-3 text-sm text-muted-foreground">You can leave this section blank if you take no medication or want to add it later.</p>
         {existingMeds.length > 0 && (
           <ul className="mb-3 space-y-1 text-sm">
             {existingMeds.map((m) => (

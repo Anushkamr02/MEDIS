@@ -257,7 +257,7 @@ export default function PatientProfile() {
 
             <AiInsights
               patientId={patientId}
-              patientAge={age}
+              reviewRequested={searchParams.get('review') === 'ai'}
               onOpenVisit={(visitId) => {
                 const v = visits.find((x) => x.visit_id === visitId);
                 if (v) navigate(`/doctor/consultations/${v.consultation_id}`);
