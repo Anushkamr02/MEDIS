@@ -28,4 +28,4 @@ backend/logs/
 Thumbs.db
 
 
-/test-results/
+test-results/

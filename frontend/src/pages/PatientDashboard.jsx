@@ -147,6 +147,7 @@ export default function PatientDashboard() {
   const lastVisit = visits.find((v) => v.status !== 'pending');
   const latestEcg = ecgAnalyses[0];
   const age = calcAge(profile?.date_of_birth);
+  const pendingAccess = accessHistory.filter((r) => r.access_status === 'pending').length;
 
   return (
     <div className="content-enter space-y-5">
@@ -158,6 +159,14 @@ export default function PatientDashboard() {
             Fill it in now
           </Link>{' '}
           so your doctors have the full picture.
+        </WarningState>
+      )}
+      {pendingAccess > 0 && (
+        <WarningState>
+          {pendingAccess === 1 ? 'A doctor is asking' : `${pendingAccess} doctors are asking`} to open your record.{' '}
+          <Link to="/patient/access" className="font-semibold underline">
+            Review the request{pendingAccess === 1 ? '' : 's'}
+          </Link>
         </WarningState>
       )}
 

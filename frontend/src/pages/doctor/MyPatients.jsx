@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, ShieldAlert } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '../../lib/supabaseClient';
-import { openPatientRecord } from '../../lib/patientAccess';
+import { getAccessStatus, openPatientRecord, requestEmergencyAccess } from '../../lib/patientAccess';
 import { useAuth } from '../../context/AuthContext';
-import { useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorData';
-import { formatDate, calcAge, humanize } from '../../lib/format';
+import { useAccessRequests, useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorData';
+import { formatDate, formatDateTime, calcAge, humanize } from '../../lib/format';
 import { priorityInfo } from '../../lib/aiPriority';
-import { Button, Input } from '../../components/ui';
-import { EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner } from '../../components/medis';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Label, Textarea } from '../../components/ui';
+import { AccessStatusPill, EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner } from '../../components/medis';
 
 // ?priority= values (links from the Overview cards)
 const PRIORITY_FILTERS = {
@@ -18,19 +19,53 @@ const PRIORITY_FILTERS = {
   review: { label: 'Needs review', matches: (p) => p === 'REVIEW' },
 };
 
+// The database enforces the same minimum for an emergency reason.
+const EMERGENCY_REASON_MIN = 10;
+
+// What the search result says under its button, by where the doctor stands.
+function accessHint(info) {
+  if (!info || info.legacy || info.status === 'active') {
+    return "Opening the record is logged in the patient's access history.";
+  }
+  const row = info.row ?? {};
+  switch (info.status) {
+    case 'pending':
+      return `Request sent ${formatDateTime(row.requested_at)}. Waiting for the patient to approve it; you will be notified.`;
+    case 'denied':
+      return `The patient declined your request on ${formatDate(row.responded_at)}. You can ask again.`;
+    case 'revoked':
+      return `The patient revoked your access on ${formatDate(row.revoked_at)}. You can ask again.`;
+    default:
+      return 'The patient approves access from their MEDIS account; you are notified when they respond. Emergency access opens the record now, needs a reason, and is flagged to the patient.';
+  }
+}
+
+function requestLine(r) {
+  if (r.access_status === 'pending') return `Requested ${formatDateTime(r.requested_at)}`;
+  if (r.access_status === 'denied') return `Declined ${formatDate(r.responded_at)}`;
+  if (r.access_status === 'revoked') return `Revoked ${formatDate(r.revoked_at)}`;
+  return '';
+}
+
 // One search filters accessible patients and looks up new patients by full ID.
 export default function MyPatients() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { patients, loading, error } = useAssignedPatients(user?.id);
+  const { patients, loading, error, refresh } = useAssignedPatients(user?.id);
   const { latest } = useLatestPriorities(patients.map((p) => p.patient_id));
+  const { requests, refresh: refreshRequests } = useAccessRequests(user?.id);
   const initial = searchParams.get('q') ?? '';
   const [filter, setFilter] = useState(initial);
   const [results, setResults] = useState(null);
+  const [access, setAccess] = useState({});
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [openingId, setOpeningId] = useState(null);
+  const [emergency, setEmergency] = useState(null);
+  const [reason, setReason] = useState('');
+  const [emergencyError, setEmergencyError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const requestId = useRef(0);
 
   const runSearch = useCallback(async (value) => {
@@ -38,6 +73,7 @@ export default function MyPatients() {
     const id = value.trim().toUpperCase();
     setSearchError('');
     setResults(null);
+    setAccess({});
     setSearching(false);
     if (!/^MEDIS-P-(?:\d{4}-)?\d+$/i.test(id)) {
       setSearchError('Enter a full Patient ID to look up a new patient. You can filter your patients by name as you type.');
@@ -48,13 +84,18 @@ export default function MyPatients() {
       const { data, error } = await supabase.rpc('search_patient_by_display_id', { p_display_id: id });
       if (currentRequest !== requestId.current) return;
       if (error) throw error;
-      setResults(data ?? []);
+      const rows = data ?? [];
+      setResults(rows);
+      // Where this doctor stands with each match decides which button shows.
+      const statuses = await Promise.all(rows.map((p) => getAccessStatus(user.id, p.patient_id)));
+      if (currentRequest !== requestId.current) return;
+      setAccess(Object.fromEntries(rows.map((p, i) => [p.patient_id, statuses[i]])));
     } catch (error) {
       if (currentRequest === requestId.current) setSearchError(error.message || 'Could not search patients. Try again.');
     } finally {
       if (currentRequest === requestId.current) setSearching(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     setFilter(initial);
@@ -66,6 +107,7 @@ export default function MyPatients() {
     requestId.current += 1;
     setFilter(value);
     setResults(null);
+    setAccess({});
     setSearchError('');
     setSearching(false);
   }
@@ -79,18 +121,61 @@ export default function MyPatients() {
     });
   }
 
+  // Opens the record when access is held (or the database predates v11);
+  // otherwise sends the patient a request and shows it as pending.
   async function openRecord(patient) {
     setSearchError('');
     setOpeningId(patient.patient_id);
     try {
-      const { error } = await openPatientRecord(user.id, patient.patient_id, 'search', { display_id: patient.display_id });
+      const { status, error } = await openPatientRecord(user.id, patient.patient_id, 'search', { display_id: patient.display_id });
       if (error) throw error;
-      navigate(`/doctor/patients/${patient.patient_id}`);
+      if (status === 'active') {
+        navigate(`/doctor/patients/${patient.patient_id}`);
+        return;
+      }
+      setAccess((prev) => ({
+        ...prev,
+        [patient.patient_id]: { status: 'pending', legacy: false, row: { requested_at: new Date().toISOString() } },
+      }));
+      refreshRequests();
+      toast.success('Access request sent. The patient will be asked to approve it.');
     } catch (error) {
       setSearchError(error.message || 'Could not open the patient record. Try again.');
     } finally {
       setOpeningId(null);
     }
+  }
+
+  function openEmergency(patient) {
+    setReason('');
+    setEmergencyError('');
+    setEmergency(patient);
+  }
+
+  function closeEmergency() {
+    if (submitting) return;
+    setEmergency(null);
+  }
+
+  async function submitEmergency(e) {
+    e.preventDefault();
+    const text = reason.trim();
+    if (text.length < EMERGENCY_REASON_MIN) {
+      setEmergencyError(`Give a reason of at least ${EMERGENCY_REASON_MIN} characters. The patient will see it.`);
+      return;
+    }
+    setSubmitting(true);
+    setEmergencyError('');
+    const { status, error } = await requestEmergencyAccess(user.id, emergency.patient_id, text, { display_id: emergency.display_id });
+    setSubmitting(false);
+    if (error || status !== 'active') {
+      setEmergencyError(error?.message || 'Emergency access was not granted. Try again.');
+      return;
+    }
+    const patientId = emergency.patient_id;
+    setEmergency(null);
+    refresh();
+    navigate(`/doctor/patients/${patientId}`);
   }
 
   const priorityFilter = PRIORITY_FILTERS[searchParams.get('priority')] ? searchParams.get('priority') : 'all';
@@ -128,20 +213,78 @@ export default function MyPatients() {
         <p className="mt-2 text-xs text-muted-foreground">Type a name or ID to filter your patients. To find a new patient, enter their full MEDIS Patient ID and select Search.</p>
         {searchError && <div className="mt-3"><ErrorState text={searchError} /></div>}
         {results?.length === 0 && <p className="mt-3 text-sm" role="status">No patient with ID {filter.trim().toUpperCase()}. Check the ID and try again.</p>}
-        {results?.map((patient) => (
-          <div key={patient.patient_id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
-            <div>
-              <p className="font-semibold">{patient.full_name || 'Unnamed patient'}</p>
-              <IDChip id={patient.display_id} />
+        {results?.map((patient) => {
+          const info = access[patient.patient_id];
+          const status = info?.status ?? 'none';
+          const canOpen = !!info && (info.legacy || status === 'active');
+          const busy = openingId === patient.patient_id;
+          return (
+            <div key={patient.patient_id} className="mt-3 rounded-xl border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{patient.full_name || 'Unnamed patient'}</p>
+                  <IDChip id={patient.display_id} />
+                </div>
+                {!info ? (
+                  <Spinner text="Checking access..." />
+                ) : canOpen ? (
+                  <Button onClick={() => openRecord(patient)} disabled={openingId !== null}>
+                    {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Open record
+                  </Button>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {status === 'pending' ? (
+                      <AccessStatusPill value="pending" />
+                    ) : (
+                      <Button onClick={() => openRecord(patient)} disabled={openingId !== null}>
+                        {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {status === 'none' ? 'Request access' : 'Request again'}
+                      </Button>
+                    )}
+                    <Button variant="outline" onClick={() => openEmergency(patient)} disabled={openingId !== null}>
+                      <ShieldAlert className="h-4 w-4 text-destructive" aria-hidden />
+                      Emergency access
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">{accessHint(info)}</p>
             </div>
-            <Button onClick={() => openRecord(patient)} disabled={openingId !== null}>
-              {openingId === patient.patient_id && <Loader2 className="h-4 w-4 animate-spin" />}
-              Open record
-            </Button>
-            <p className="w-full text-xs text-muted-foreground">Opening the record grants access and is logged in the patient's access history.</p>
-          </div>
-        ))}
+          );
+        })}
       </Section>
+
+      {requests.length > 0 && (
+        <Section title="Access requests">
+          <ul className="divide-y rounded-lg border" aria-label="Access requests">
+            {requests.map((r) => (
+              <li key={r.patient_id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
+                <div>
+                  <p className="font-medium">{r.profiles?.full_name || 'Unnamed patient'}</p>
+                  <IDChip id={r.profiles?.display_id} />
+                </div>
+                <AccessStatusPill value={r.access_status} />
+                <span className="text-xs text-muted-foreground">{requestLine(r)}</span>
+                {r.access_status !== 'pending' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={openingId !== null}
+                    onClick={() => openRecord({ patient_id: r.patient_id, display_id: r.profiles?.display_id })}
+                  >
+                    Request again
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            A patient decides who may open their record. You are notified when they respond, and an approved patient appears in the list below.
+          </p>
+        </Section>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <SegmentedTabs
           label="AI check filter"
@@ -163,7 +306,7 @@ export default function MyPatients() {
           <EmptyState
             text={
               patients.length === 0
-                ? 'No patients yet. Search a Patient ID to open a record.'
+                ? 'No patients yet. Search a Patient ID to request access to a record.'
                 : term
                   ? 'No patients match this search.'
                   : priorityFilter !== 'all'
@@ -232,6 +375,37 @@ export default function MyPatients() {
           the analysis again.
         </p>
       </Section>
+
+      <Dialog open={!!emergency} onOpenChange={(open) => { if (!open) closeEmergency(); }}>
+        <DialogContent>
+          <form onSubmit={submitEmergency} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Emergency access</DialogTitle>
+              <DialogDescription>
+                Open {emergency?.full_name || 'this patient'}'s record now, without waiting for their approval. The reason you give is
+                shown to the patient, and the access is marked as emergency in their access history.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5">
+              <Label htmlFor="emergency-reason">Reason (required)</Label>
+              <Textarea
+                id="emergency-reason"
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Brought to emergency with acute chest pain; unable to respond"
+              />
+            </div>
+            {emergencyError && <p role="alert" className="text-sm text-destructive">{emergencyError}</p>}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeEmergency} disabled={submitting}>Cancel</Button>
+              <Button type="submit" variant="destructive" disabled={submitting}>
+                {submitting ? 'Opening...' : 'Open record now'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

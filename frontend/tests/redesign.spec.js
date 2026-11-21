@@ -78,7 +78,7 @@ test('old search links redirect with query and preserve logged record access', a
   await page.goto('/doctor/search?q=MEDIS-P-000123&priority=attention');
   await expect(page).toHaveURL(/\/doctor\/patients\?q=MEDIS-P-000123&priority=attention/);
   await expect(page.getByRole('heading', { name: 'My patients', exact: true })).toBeVisible();
-  await expect(page.getByText('Opening the record grants access', { exact: false })).toBeVisible();
+  await expect(page.getByText("Opening the record is logged in the patient's access history", { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Open record', exact: true }).first().click();
   await expect(page).toHaveURL(new RegExp(`/doctor/patients/${PATIENT}$`));
   expect(state.requests.some((r) => r.name === 'log_patient_access' && r.body?.p_action === 'opened_patient_record')).toBe(true);

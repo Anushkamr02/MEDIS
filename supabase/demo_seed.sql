@@ -374,6 +374,31 @@ begin
     (v_p1, 'general', 'Report reminder',
      'Please upload your CT coronary angiography report once available.', null, false, '2026-10-20 09:00+05:30');
 
+  -- ----------------------------------------------------------
+  -- 11. Patient-controlled access (migration v11): Dr. Rao has asked
+  --     to open Ananya's record and is waiting for her answer.
+  --     Skipped on a database without v11.
+  -- ----------------------------------------------------------
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'doctor_patient_assignments'
+               and column_name = 'access_status') then
+    insert into public.doctor_patient_assignments
+      (doctor_id, patient_id, is_active, access_status, access_reason, requested_at)
+    values (v_d2, v_p2, false, 'pending', 'Referred for a diabetes and cardiac risk review',
+            now() - interval '2 hours')
+    on conflict (doctor_id, patient_id) do update
+      set is_active = false, access_status = 'pending', is_emergency = false,
+          access_reason = excluded.access_reason, requested_at = excluded.requested_at,
+          responded_at = null, revoked_at = null;
+    insert into public.audit_logs (user_id, action, target_id, target_type, metadata, created_at)
+    values (v_d2, 'access_requested', v_p2, 'patient',
+            '{"reason":"Referred for a diabetes and cardiac risk review"}', now() - interval '2 hours');
+    insert into public.notifications (user_id, type, title, body, related_id, is_read, created_at)
+    values (v_p2, 'general', 'A doctor is asking to open your record',
+            'Dr. Arjun Rao has asked for access to your MEDIS record. Reason: Referred for a diabetes and cardiac risk review. Approve or decline it under "Doctors who accessed your profile".',
+            v_d2, false, now() - interval '2 hours');
+  end if;
+
   raise notice 'Demo data loaded. Patient IDs: % (Rahul), % (Ananya)',
     (select display_id from public.profiles where id = v_p1),
     (select display_id from public.profiles where id = v_p2);

@@ -1,9 +1,8 @@
-<<<<<<< HEAD
 # MEDIS — Medical Evaluation & Diagnostic Intelligence System
 
 MEDIS is a multi-hospital electronic health record with digital consultations and AI-assisted, longitudinal screening for coronary artery disease (CAD).
 
-Every patient gets one permanent **MEDIS Patient ID** that works at every hospital. A doctor opens a patient's record by searching that ID; the access is logged and shown to the patient. Visits, prescriptions, lab results and reports from all hospitals form one timeline. AI decision support then looks for worsening trends across those visits.
+Every patient gets one permanent **MEDIS Patient ID** that works at every hospital. A doctor finds a patient by that ID and asks for access; the record opens once the patient approves, and every access is logged and shown to the patient. Visits, prescriptions, lab results and reports from all hospitals form one timeline. AI decision support then looks for worsening trends across those visits.
 
 > **Decision support, not a diagnosis.** MEDIS is a college major project and a prototype. It is not a certified medical device; every AI output is labelled and the final decision rests with the doctor.
 
@@ -16,12 +15,13 @@ Every patient gets one permanent **MEDIS Patient ID** that works at every hospit
 - See appointments, current medicines, every visit across hospitals, and the results doctors choose to share.
 - Download prescriptions and a consolidated **medical history PDF**.
 - Upload reports (PDF or any photo, including HEIC/WebP).
+- **Control who can open the record:** approve or decline a doctor's access request, and revoke any doctor later. Emergency access is flagged with the reason the doctor gave.
 - See every doctor who opened the record (**access history**).
 - **Heart health check:** a plain-language view of the AI screening, once the doctor shares it.
 - **Ask MEDIS chatbot:** explains the patient's own shared results and medicines in simple words. It does not diagnose, and it shows an emergency notice for red-flag symptoms.
 
 ### For doctors
-- Search a patient by ID, see the full multi-hospital record, and add medications, conditions, family history and reports.
+- Search a patient by ID and request access; once the patient approves, see the full multi-hospital record and add medications, conditions, family history and reports. **Emergency access** opens the record at once, needs a written reason, and is shown to the patient.
 - **Digital consultation:**
   - Complaints, including structured symptoms (chest pain type, severity, radiation, pain at rest, syncope, NYHA class).
   - Vitals and lab values.
@@ -52,7 +52,7 @@ React + Vite frontend ──► Supabase (Auth, Postgres with row-level security
                               └─ Google Gemini (summary, chatbot)
 ```
 
-- **Supabase** is the system of record. Row-level security decides who sees what: a doctor only sees patients they have opened, and a patient only sees their own data and the visits a doctor has shared.
+- **Supabase** is the system of record. Row-level security decides who sees what: a doctor only sees patients who approved their access (or whom they opened under emergency access), and a patient only sees their own data and the visits a doctor has shared.
 - **The AI service** calls Supabase with the **signed-in user's own token**, so the same access rules apply to AI features. It never uses a service-role key.
 
 ## Tech stack
@@ -100,13 +100,21 @@ In the Supabase SQL editor, run the migrations in order:
 
 1. `supabase_migration_v1.sql`, `v2`, `v3`, `v3b` (the base schema)
 2. `supabase_migration_v3c.sql` → `v3d` → `v3e` → `v3f`
-3. `supabase_migration_v4.sql` → `v5` → `v6` → `v7` → `v8`
+3. `supabase_migration_v4.sql` → `v5` → `v6` → `v7` → `v8` → `v9` → `v10` → `v11`
 4. Optional: `demo_seed.sql`, which loads the demo accounts and data
 
-`v8` is required by the dashboards: it adds the per-event access history
-(`log_patient_access`, `get_patient_access_events`), the richer visit
-history (`get_patient_visits`, `get_patient_visit_details`), document
-deletion (`delete_medical_report`) and `medical_reports.file_size_bytes`.
+Every migration is safe to re-run, so an existing database only needs the
+ones it has not had yet.
+
+The last four are each required by a feature:
+
+- `v8` — the dashboards: per-event access history (`log_patient_access`,
+  `get_patient_access_events`), the richer visit history
+  (`get_patient_visits`, `get_patient_visit_details`), document deletion
+  (`delete_medical_report`) and `medical_reports.file_size_bytes`.
+- `v9` — signing in with a MEDIS ID (`resolve_login_email`).
+- `v10` — deleting your own unfinished consultation (`delete_own_draft`).
+- `v11` — patient-controlled access: `request_patient_access`, `respond_access_request`, `revoke_doctor_access`, and a trigger so nothing else can grant access. Without it, opening a record grants access at once as before.
 
 ### 2. Backend (AI service)
 ```bash
@@ -156,8 +164,5 @@ python -m unittest test_longitudinal_engine test_visit_patterns
 ## Documentation
 - [docs/INTEGRATION_PLAN.md](docs/INTEGRATION_PLAN.md): how the AI engine was integrated, endpoints and migrations.
 - [docs/UI_FEATURES_SPEC.md](docs/UI_FEATURES_SPEC.md): every screen, button and state.
+- [docs/DASHBOARD_PANELS.md](docs/DASHBOARD_PANELS.md): what each dashboard panel shows.
 - [backend/README.md](backend/README.md): engine internals, algorithms and model details.
-=======
-# MEDIS
-MEDIS is an AI-powered platform for Coronary Artery Disease (CAD) screening. It integrates patient records, ECG analysis, medical report extraction, digital consultations, prescriptions, and long-term health tracking to help doctors assess cardiovascular risk and make informed clinical decisions.
->>>>>>> origin/main

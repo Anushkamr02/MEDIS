@@ -163,14 +163,21 @@ things.
   *"Results not shared yet"*.
 - Drafts are never shown to patients.
 
-### 2.5 Doctors who accessed your record [EXISTS]
-- **Rows:**
-  - doctor name and Doctor ID,
-  - hospital,
-  - first access date,
-  - last access date,
-  - how they opened the record (ID search, appointment, consultation).
-- **Purpose:** transparency. Design this so it feels trustworthy, not alarming.
+### 2.5 Doctors who accessed your record [CHANGED: the patient grants access]
+- **[NEW] Access requests (top, only when there are any):** one card per doctor asking to
+  open the record: doctor name and Doctor ID, hospital and specialization, when they asked,
+  the reason they gave (optional), and **Approve access** / **Decline** buttons. A warning
+  banner on the dashboard links here while a request is waiting.
+- **Access records:** the per-event audit list (§2.5 before). **Emergency access** and
+  **Access requested** appear as event types.
+- **Doctors with access to your record:** one row per doctor with access: name and ID,
+  hospital, an access-status pill (**Access granted**, or **Emergency access** in red with the
+  doctor's reason), "Since … · Last …", visit count, and a **Revoke** button. Revoking asks
+  for confirmation and takes effect immediately.
+- **Past requests and revoked access:** the same rows for declined and revoked doctors,
+  read-only.
+- **Purpose:** the patient decides who may open the record; everything else is transparency.
+  Design this so it feels trustworthy, not alarming.
 
 ### 2.6 Shared results [EXISTS]
 - One entry per shared visit:
@@ -364,8 +371,16 @@ If the profile is empty, show a **Complete your profile** button.
 
 ### 3.2 Search Patient (`/doctor/search`) [EXISTS]
 - **Input:** Patient ID (`MEDIS-P-…`) and a **Search** button.
-- **Result card:** name and ID, plus an **Open record** button. Opening the record grants and
-  logs access.
+- **Result card:** name and ID, plus a button that depends on where this doctor stands:
+  - access already granted → **Open record** (logged in the patient's access history);
+  - never asked, declined or revoked → **Request access** (the patient is notified and
+    approves from their account) and **Emergency access**;
+  - request waiting → a **Pending approval** pill and **Emergency access**.
+- **[NEW] Emergency access dialog:** a required reason (at least 10 characters), **Open record
+  now** (destructive style). The reason is shown to the patient and the access is flagged in
+  their history and notifications.
+- **[NEW] Access requests section:** this doctor's pending, declined and revoked requests with
+  status pills and a **Request again** button where it applies.
 - **Not found state:** "No patient with this ID. Check the ID with the patient and try again."
 
 ### 3.3 My Patients (`/doctor/patients`) [CHANGED]
@@ -773,7 +788,8 @@ States:
 |---|---|---|
 | Notification bell plus dropdown | Patient header, doctor layout | Unread badge, **Mark all as read** |
 | Visit timeline | Patient dashboard, doctor Patient Profile | Vertical timeline; the patient view hides unshared diagnoses |
-| Access history | Both | Doctor, hospital, first and last access, source |
+| Access history | Both | Doctor, hospital, access-status pill, first and last access; the patient's view adds **Revoke** |
+| **[NEW]** Access-status pill | My Patients, access history | Pending approval / Access granted / Declined / Revoked / Emergency access |
 | Document upload plus list | Patient dashboard, doctor profile, consultation | Type, hospital, date, file, note; list with status and **View** |
 | Prescription card | Both | **[NEW]** PDF button |
 | Field (label: value) | Profiles | "—" when empty |

@@ -2,11 +2,12 @@
 // status/priority pills, section cards and empty/error/loading states.
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, CircleDot, CloudOff, Copy, Inbox, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, CircleDot, CloudOff, Copy, Inbox, Loader2, ShieldAlert, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui';
 import { cn } from '../lib/utils';
 import { priorityInfo } from '../lib/aiPriority';
+import { accessStatusInfo } from '../lib/accessStatus';
 import medicalEmblem from './medical-emblem.png';
 
 // ---------- Brand ----------
@@ -146,6 +147,25 @@ export function PriorityPill({ value, size = 'sm' }) {
     <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold tracking-wide', size === 'lg' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-[11px]', PRI[info.cls])}>
       <Icon className={size === 'lg' ? 'h-4 w-4' : 'h-3 w-3'} aria-hidden />
       {info.label}
+    </span>
+  );
+}
+
+const ACCESS_PILL = {
+  none: 'bg-muted text-muted-foreground border-border',
+  pending: 'bg-warning-soft text-warning border-warning/30',
+  ok: 'bg-success-soft text-success border-success/20',
+  denied: 'bg-destructive-soft text-destructive border-destructive/20',
+};
+/** A doctor's access to one patient record (migration v11). Access taken in an emergency is flagged rather than shown as granted. */
+export function AccessStatusPill({ value, isActive, emergency }) {
+  const info = accessStatusInfo(value, isActive);
+  const flagged = emergency && info.cls === 'ok';
+  const Icon = flagged ? ShieldAlert : CircleDot;
+  return (
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium', ACCESS_PILL[flagged ? 'denied' : info.cls])}>
+      <Icon className="h-3 w-3" aria-hidden />
+      {flagged ? 'Emergency access' : info.label}
     </span>
   );
 }

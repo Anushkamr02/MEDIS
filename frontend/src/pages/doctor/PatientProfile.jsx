@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { usePatientRecord } from '../../hooks/useDoctorData';
-import { logPatientAccess } from '../../lib/patientAccess';
+import { getAccessStatus, logPatientAccess } from '../../lib/patientAccess';
 import { formatDate, formatDateTime, calcAge, calcBmi, humanize } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { Button, SimpleSelect } from '../../components/ui';
@@ -107,6 +107,20 @@ export default function PatientProfile() {
     logPatientAccess(profile.id, 'viewed_patient');
   }, [profile, user?.id]);
 
+  // With no profile row there is no access; say whether a request is
+  // waiting, was declined or was revoked, instead of a blanket message.
+  const [access, setAccess] = useState(null);
+  useEffect(() => {
+    if (loading || profile || !user?.id) return;
+    let cancelled = false;
+    getAccessStatus(user.id, patientId).then((result) => {
+      if (!cancelled) setAccess(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, profile, user?.id, patientId]);
+
   function selectTab(key) {
     const next = new URLSearchParams(searchParams);
     if (key === 'overview') next.delete('tab');
@@ -163,13 +177,22 @@ export default function PatientProfile() {
   if (loading) return <Spinner text="Loading patient record..." />;
 
   if (!profile) {
+    const status = access?.status;
+    const text =
+      status === 'pending'
+        ? "Your request to open this record is waiting for the patient's approval. You will be notified when they respond."
+        : status === 'denied'
+          ? 'The patient declined your request to open this record. You can ask again from My patients.'
+          : status === 'revoked'
+            ? 'The patient revoked your access to this record. You can ask again from My patients.'
+            : "You don't have access to this record yet. Request it by searching the patient's ID, or open it from an appointment they booked.";
     return (
       <div className="space-y-3">
         <EmptyState
-          text="You don't have access to this record yet. You can only view patients whose record you've opened via their Patient ID or an appointment."
+          text={text}
           action={
             <Button asChild size="sm">
-              <Link to="/doctor/search">Search patient</Link>
+              <Link to="/doctor/patients">Go to My patients</Link>
             </Button>
           }
         />

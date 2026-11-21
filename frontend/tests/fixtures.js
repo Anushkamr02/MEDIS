@@ -17,6 +17,9 @@ export async function mockApp(page, role = 'doctor', options = {}) {
 
   const state = { requests: [], failDelete: false, failAppointments: false, failSearch: false, ...options };
   const at = new Date().toISOString();
+  // The doctor's one assignment row (migration v11 columns). `assignment: null` = no access yet;
+  // `legacyAccess: true` = a database without v11 (no access_status column, no request RPCs).
+  if (state.assignment === undefined) state.assignment = { doctor_id: DOCTOR, patient_id: PATIENT, is_active: true, access_status: 'active', is_emergency: false, assigned_at: at, requested_at: at, responded_at: at, revoked_at: null, profiles: patient };
   const draft = { id: DRAFT, visit_id: 'MEDIS-V-000001', patient_id: PATIENT, doctor_id: DOCTOR, consultation_date: at, updated_at: at, status: 'pending', profiles: patient, complaints: {} };
   const finalized = { id: FINAL, visit_id: 'MEDIS-V-000002', patient_id: PATIENT, doctor_id: DOCTOR, consultation_date: '2026-01-10T10:00:00Z', status: 'completed', profiles: patient, final_diagnosis: 'Synthetic diagnosis', complaints: {}, vitals: {}, observations: {} };
   state.consultations = [draft, finalized];
@@ -86,6 +89,29 @@ export async function mockApp(page, role = 'doctor', options = {}) {
       return send(state.visits.filter((v) => !v.consultation_id.startsWith('visit-') ? live.has(v.consultation_id) : true));
     }
     if (name === 'get_patient_access_history') return send(state.accessSummary ?? []);
+    if (name === 'request_patient_access') {
+      if (state.legacyAccess) return send({ code: 'PGRST202', message: 'Could not find the function public.request_patient_access in the schema cache' }, 404);
+      if (state.failAccessRequest) return send({ code: '42501', message: 'Only doctors can request access to a patient record.' }, 403);
+      const row = state.assignment;
+      if (row?.patient_id === body.p_patient_id && row.is_active) return send('active');
+      const granted = body.p_emergency === true;
+      state.assignment = { doctor_id: DOCTOR, patient_id: body.p_patient_id, is_active: granted, access_status: granted ? 'active' : 'pending', is_emergency: granted, access_reason: body.p_reason ?? null, assigned_at: at, requested_at: at, responded_at: granted ? at : null, revoked_at: null, profiles: patient };
+      return send(granted ? 'active' : 'pending');
+    }
+    if (name === 'respond_access_request') {
+      const row = (state.accessSummary ?? []).find((r) => r.doctor_id === body.p_doctor_id && r.access_status === 'pending');
+      if (!row) return send({ code: 'P0002', message: 'There is no pending access request from this doctor.' }, 400);
+      Object.assign(row, body.p_approve
+        ? { is_active: true, access_status: 'active', first_access: at, responded_at: at, revoked_at: null }
+        : { is_active: false, access_status: 'denied', responded_at: at });
+      return send(body.p_approve ? 'active' : 'denied');
+    }
+    if (name === 'revoke_doctor_access') {
+      const row = (state.accessSummary ?? []).find((r) => r.doctor_id === body.p_doctor_id && r.is_active);
+      if (!row) return send({ code: 'P0002', message: 'This doctor does not currently have access to your record.' }, 400);
+      Object.assign(row, { is_active: false, access_status: 'revoked', revoked_at: at });
+      return send(null, 204);
+    }
     if (name === 'log_patient_access') {
       if (state.failAccessLog) return send({ code: '42501', message: 'Not authorized to access this patient record.' }, 403);
       state.accessLogs = [...(state.accessLogs ?? []), body];
@@ -126,7 +152,17 @@ export async function mockApp(page, role = 'doctor', options = {}) {
       case 'profiles': rows = [url.searchParams.get('id') === `eq.${PATIENT}` ? patient : profile]; break;
       case 'hospitals': rows = hospitals; break;
       case 'doctor_profiles': rows = [doctorDetails]; break;
-      case 'doctor_patient_assignments': rows = [{ doctor_id: DOCTOR, patient_id: PATIENT, is_active: true, assigned_at: at, profiles: patient }]; break;
+      case 'doctor_patient_assignments': {
+        if (state.legacyAccess && (url.searchParams.get('select') ?? '').includes('access_status')) {
+          return send({ code: '42703', message: 'column doctor_patient_assignments.access_status does not exist' }, 400);
+        }
+        const inFilter = /^in\.\((.*)\)$/.exec(url.searchParams.get('access_status') ?? '');
+        rows = [state.assignment].filter(Boolean)
+          .filter((r) => !url.searchParams.get('patient_id') || url.searchParams.get('patient_id') === `eq.${r.patient_id}`)
+          .filter((r) => url.searchParams.get('is_active') !== 'eq.true' || r.is_active)
+          .filter((r) => !inFilter || inFilter[1].split(',').includes(r.access_status));
+        break;
+      }
       case 'patient_profiles': rows = [{ id: PATIENT, blood_group: 'O+', height_cm: 175, weight_kg: 75, known_conditions: {}, allergies: 'Synthetic allergy' }]; break;
       case 'cad_assessments': rows = [state.assessment]; break;
       case 'medical_reports': rows = state.documents; break;

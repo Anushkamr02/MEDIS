@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mockApp, DOCTOR } from './fixtures';
+import { mockApp, DOCTOR, PATIENT } from './fixtures';
 
 for (const scenario of ['current schema', 'missing file size', 'permission denied', 'another missing column']) {
   test(`document upload handles ${scenario}`, async ({ page }) => {
@@ -52,6 +52,17 @@ test('older migrations show a doctor summary when event RPC is absent', async ({
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByLabel('Search access history by doctor').fill('Nobody');
   await expect(page.getByText('No access summaries match these filters.')).toBeVisible();
+});
+
+test('older migrations grant record access on open, without the request flow', async ({ page }) => {
+  const state = await mockApp(page, 'doctor', { legacyAccess: true, assignment: null });
+  await page.goto('/doctor/patients?q=MEDIS-P-000123');
+  await expect(page.getByRole('button', { name: 'Request access', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open record', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/doctor/patients/${PATIENT}$`));
+  expect(state.requests.some((r) => r.name === 'doctor_patient_assignments' && r.method === 'POST')).toBe(true);
+  expect(state.requests.some((r) => r.name === 'log_patient_access' && r.body?.p_action === 'opened_patient_record')).toBe(true);
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('older migrations open visit details using existing table queries', async ({ page }) => {

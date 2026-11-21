@@ -35,6 +35,35 @@ export function useAssignedPatients(doctorId) {
 }
 
 /**
+ * This doctor's access requests that are not (or no longer) granted:
+ * pending, declined or revoked, newest first. Empty on a database
+ * without migration v11, where opening a record grants access at once.
+ */
+export function useAccessRequests(doctorId) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchRequests = useCallback(async () => {
+    if (!doctorId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('doctor_patient_assignments')
+      .select('patient_id, access_status, requested_at, responded_at, revoked_at, profiles:patient_id(full_name, display_id)')
+      .eq('doctor_id', doctorId)
+      .in('access_status', ['pending', 'denied', 'revoked'])
+      .order('requested_at', { ascending: false, nullsFirst: false });
+    setRequests(error ? [] : data ?? []);
+    setLoading(false);
+  }, [doctorId]);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [fetchRequests]);
+
+  return { requests, loading, refresh: fetchRequests };
+}
+
+/**
  * Latest AI screening result per patient: { [patientId]: { review_priority,
  * created_at } }. Only the newest assessment counts, so a patient whose
  * latest run found no concern is not listed as critical for an older run.

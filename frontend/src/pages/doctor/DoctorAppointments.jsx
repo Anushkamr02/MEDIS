@@ -129,17 +129,22 @@ export default function DoctorAppointments() {
     loadAppointments();
   }
 
-  // Grants access if the patient booked directly (no assignment yet),
-  // then opens their record with this appointment as context.
+  // An appointment the patient booked themself counts as consent, so the
+  // record opens at once; otherwise the patient is asked first and the
+  // doctor is told to wait.
   async function openAppointment(appointment) {
     setListError('');
     setUpdatingId(appointment.id);
-    const { error } = await openPatientRecord(user.id, appointment.patient_id, 'appointment', {
+    const { status, error } = await openPatientRecord(user.id, appointment.patient_id, 'appointment', {
       appointment_id: appointment.id,
     });
     setUpdatingId(null);
     if (error) {
       setListError(error.message);
+      return;
+    }
+    if (status !== 'active') {
+      toast.info('Access requested. The patient has been asked to approve it; you will be notified when they respond.');
       return;
     }
     navigate(`/doctor/patients/${appointment.patient_id}`, {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CalendarClock, ClipboardCheck, FilePen, FileSearch, Search, ShieldAlert, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorData';
@@ -70,16 +71,21 @@ export default function DoctorOverview() {
     loadStats();
   }, [user?.id]);
 
-  // Opening from an appointment grants access if the patient booked
-  // directly (no assignment yet), then carries the appointment along so
-  // the patient page can offer "Start consultation" for it.
+  // An appointment the patient booked themself counts as consent, so the
+  // record opens at once and the appointment is carried along so the
+  // patient page can offer "Start consultation" for it. Otherwise the
+  // patient is asked first.
   async function openAppointment(a) {
     setError(null);
     setOpeningId(a.id);
-    const { error: accessError } = await openPatientRecord(user.id, a.patient_id, 'appointment', { appointment_id: a.id });
+    const { status, error: accessError } = await openPatientRecord(user.id, a.patient_id, 'appointment', { appointment_id: a.id });
     setOpeningId(null);
     if (accessError) {
       setError(accessError.message);
+      return;
+    }
+    if (status !== 'active') {
+      toast.info('Access requested. The patient has been asked to approve it; you will be notified when they respond.');
       return;
     }
     navigate(`/doctor/patients/${a.patient_id}`, {
