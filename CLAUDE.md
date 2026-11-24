@@ -2,6 +2,10 @@
 
 Guidance for Claude Code when working in this repository.
 
+For a full orientation (flows, endpoints, data model, stale-doc traps), read
+[docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). For the IEEE paper, start with
+the [short paper handoff](docs/PAPER_CONTEXT.md).
+
 ## What this project is
 
 **MEDIS** — Medical Evaluation & Diagnostic Intelligence System. A multi-hospital
@@ -25,7 +29,7 @@ React 19 + Vite frontend ──► Supabase (Auth, Postgres + RLS, Storage)   <-
         │
         └──────────────────► FastAPI AI service (backend/server.py)
                                  ├─ medis/ engine (trends, PCE, ECG CNN, OCR, PDFs)
-                                 └─ Google Gemini (AI summary, Ask MEDIS chatbot)
+                                 └─ Google Gemini (Ask MEDIS patient chatbot)
 ```
 
 Two rules that the whole design rests on:
@@ -50,6 +54,7 @@ backend/
   server.py            FastAPI app — all /ai and /pdf endpoints
   supa.py              Supabase REST client using the caller's token
   adapters.py          Supabase rows -> engine input formats
+  record_summary.py    Local, deterministic prior-visit summary for doctors
   llm.py               Gemini prompts, JSON schemas, number-grounding check
   history_pdf.py       Consolidated history PDF
   medis/ai/            longitudinal_analysis, ascvd (PCE), visit_patterns, trajectories, seasonality
