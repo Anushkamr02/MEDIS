@@ -8,6 +8,7 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 import { cn } from '../lib/utils';
 import { priorityInfo } from '../lib/aiPriority';
 import { accessStatusInfo } from '../lib/accessStatus';
+import { trendInfo } from '../lib/healthTrend';
 import medicalEmblem from './medical-emblem.png';
 
 // ---------- Brand ----------
@@ -147,6 +148,23 @@ export function PriorityPill({ value, size = 'sm' }) {
     <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold tracking-wide', size === 'lg' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-[11px]', PRI[info.cls])}>
       <Icon className={size === 'lg' ? 'h-4 w-4' : 'h-3 w-3'} aria-hidden />
       {info.label}
+    </span>
+  );
+}
+
+export const TREND_PILL = {
+  worse: 'bg-destructive-soft text-destructive border-destructive/30',
+  better: 'bg-success-soft text-success border-success/30',
+  stable: 'bg-muted text-foreground border-border',
+  none: 'bg-muted text-muted-foreground border-border',
+};
+/** Monitoring trend (IMPROVING, WORSENING, ...): direction since the last check, shown beside, never instead of, the priority. */
+export function TrendPill({ value, label, cls, size = 'sm' }) {
+  const info = trendInfo(value);
+  return (
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full border font-semibold', size === 'lg' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-[11px]', TREND_PILL[cls ?? info.cls])}>
+      {!label && <span aria-hidden>{info.arrow}</span>}
+      {label ?? info.label}
     </span>
   );
 }

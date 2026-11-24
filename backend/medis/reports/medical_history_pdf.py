@@ -25,11 +25,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def generate_patient_medical_history_pdf(patient_id: str, db: Session, output_filename: str = None,
-                                         ai_report: dict = None, include_ai: bool = True) -> str:
+                                         ai_report: dict = None, include_ai: bool = True,
+                                         health_summary: dict = None) -> str:
     """
     Renders the official consolidated MEDIS Medical History PDF for a patient across all visits.
     ai_report: use this (already reviewed) assessment instead of generating one.
-    include_ai: False leaves out section 5, e.g. for a patient copy without a shared assessment.
+    include_ai: False leaves out section 5, e.g. for a patient copy (AI output is doctor-only).
+    health_summary: a doctor-published patient summary, printed as section 5 when include_ai is False.
     """
     patient = db.query(Patient).filter(Patient.patient_id == patient_id).first()
     if not patient:
@@ -330,6 +332,8 @@ def generate_patient_medical_history_pdf(patient_id: str, db: Session, output_fi
     if include_ai:
         _append_ai_section(story, ai_report or generate_longitudinal_cad_report(patient_id, db, persist=False),
                            section_h2, body_style, body_bold, bullet_style)
+    elif health_summary:
+        _append_health_summary_section(story, health_summary, section_h2, body_style, body_bold, bullet_style)
 
     # 8. Disclaimer & Legal Regulatory Footnote
     footer_text = (
@@ -388,3 +392,38 @@ def _append_ai_section(story, ai_report, section_h2, body_style, body_bold, bull
 
     story.append(Spacer(1, 14))
 
+
+
+# Doctor-chosen status (patient_health_summaries.status_message, migration v14);
+# same wording as frontend/src/lib/healthSummary.js. Never derived from the AI priority.
+HEALTH_SUMMARY_STATUS = {
+    "steady": "Your results look steady",
+    "keep_an_eye": "Some results to keep an eye on",
+    "book_visit": "Please book a visit to discuss",
+}
+
+
+def _append_health_summary_section(story, summary, section_h2, body_style, body_bold, bullet_style):
+    from xml.sax.saxutils import escape
+
+    story.append(Paragraph("<b>5. HEALTH SUMMARY FROM YOUR DOCTOR</b>", section_h2))
+    published = (summary.get("published_at") or "")[:10]
+    doctor = f"Dr. {summary['doctor']}" if summary.get("doctor") else "your doctor"
+    story.append(Paragraph(f"Written and checked by {escape(doctor)} on {published}.", body_style))
+    story.append(Spacer(1, 4))
+    status = HEALTH_SUMMARY_STATUS.get(summary.get("status_message"), "")
+    story.append(Paragraph(f"<b>{escape(status)}</b>", body_bold))
+    story.append(Paragraph(escape(summary.get("headline") or ""), body_style))
+    for point in summary.get("points") or []:
+        story.append(Paragraph(f"&bull; {escape(point)}", bullet_style))
+    metrics = summary.get("shown_metrics") or {}
+    if metrics:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("<b>Your measured values:</b>", body_bold))
+        for m in metrics.values():
+            readings = ", ".join(f"{p['value']} on {p['date'][:10]}" for p in m.get("points", []))
+            story.append(Paragraph(f"&bull; {escape(m.get('label', ''))} ({escape(m.get('unit') or '')}): {escape(readings)}", bullet_style))
+    if summary.get("next_step"):
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Next step:</b> {escape(summary['next_step'])}", body_style))
+    story.append(Spacer(1, 14))

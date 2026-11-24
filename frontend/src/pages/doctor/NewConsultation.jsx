@@ -4,10 +4,12 @@ import { AlertTriangle, Loader2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
+import { runMonitoring } from '../../lib/monitoring';
 import { usePatientRecord } from '../../hooks/useDoctorData';
 import PrescriptionForm from '../../components/PrescriptionForm';
 import DocumentUpload from '../../components/DocumentUpload';
 import AiInsights from '../../components/ai/AiInsights';
+import ClinicalInsights from '../../components/ai/ClinicalInsights';
 import DocumentAiActions from '../../components/ai/DocumentAiActions';
 import { calcAge, calcBmi, formatDate, formatDateTime, humanize } from '../../lib/format';
 import { cn } from '../../lib/utils';
@@ -469,6 +471,7 @@ export default function NewConsultation() {
       target_id: consultation.id,
       target_type: 'consultation',
     });
+    if (finalize) runMonitoring(consultation.patient_id, 'visit_finalized', consultation.id);
   }
 
   async function toggleShare() {
@@ -762,13 +765,15 @@ export default function NewConsultation() {
             </fieldset>
           </form>
 
-          <AiInsights
-            compact
-            patientId={consultation.patient_id}
-            patientAge={age}
-            consultationId={consultation.id}
-            getDraftValues={readOnly ? undefined : () => rowFromForm(form)}
-          />
+          <ClinicalInsights patientId={consultation.patient_id}>
+            <AiInsights
+              compact
+              patientId={consultation.patient_id}
+              patientAge={age}
+              consultationId={consultation.id}
+              getDraftValues={readOnly ? undefined : () => rowFromForm(form)}
+            />
+          </ClinicalInsights>
 
           <Section title="Test reports for this visit">
             <DocumentUpload

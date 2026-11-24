@@ -1,6 +1,9 @@
 """Clinical paragraph tests; synthetic records only, no Gemini or Supabase calls."""
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
+from fastapi import HTTPException
+import llm
 import server
 from record_summary import summarize_records
 
@@ -10,12 +13,14 @@ def display_text(summary):
 
 
 class FakeSupa:
-    def __init__(self, assessment=None):
-        self.assessment = assessment
+    def __init__(self, assessment=None, v14=False):
+        self.assessment, self.v14 = assessment, v14
         self.queries, self.updates = [], []
 
     async def select(self, table, params):
         self.queries.append((table, params))
+        if table == "patient_health_summaries" and not self.v14:
+            raise HTTPException(404, "Could not find the table 'public.patient_health_summaries'")
         if table == "cad_assessments":
             return [self.assessment] if self.assessment else []
         if table == "consultations":
@@ -30,14 +35,15 @@ class FakeSupa:
 
 
 class RecordSummaryTests(unittest.IsolatedAsyncioTestCase):
-    async def request(self, db):
-        model = AsyncMock()
-        with patch.object(server, "require_patient_access", AsyncMock(return_value={})), \
+    async def request(self, db, model=None):
+        # Default: Gemini unconfigured, so the rule-based summary is used.
+        model = model or AsyncMock(side_effect=HTTPException(503, "AI text features are not configured"))
+        with patch.object(server, "require_patient_access", AsyncMock(return_value={"gender": "male", "date_of_birth": "1975-01-01"})), \
                 patch.object(server, "audit", AsyncMock()), \
                 patch.object(server.llm, "generate_json", model):
             result = await server.ai_summary("TEST-P1", server.SummaryRequest(),
                                             (db, {"id": "TEST-D1", "role": "doctor"}))
-        model.assert_not_called()
+        self.model = model
         return result
 
     async def test_single_visit_without_assessment_or_diagnosis_is_summarized(self):
@@ -147,6 +153,74 @@ class RecordSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Alert and oriented", paragraph)
         for raw in ("MEDIS-", "{", "}", "main_complaint", "null", "True"):
             self.assertNotIn(raw, paragraph)
+
+
+MONITORING = {"health_trend": "WORSENING", "reasons": ["LDL 120 → 150 mg/dL (10 Jan 2026 → 10 Mar 2026)"],
+              "treatment_responses": [{"medicine": "Atorvastatin", "status": "awaiting_follow_up"}]}
+GEMINI_ANSWER = {
+    "overview": "Blood pressure 125/80 on 3 Nov 2026; trend Worsening since the last check.",
+    "changes": [{"text": "LDL rose from 120 to 150 mg/dL.", "visit_ids": ["TEST-V1"]}],
+    "review_points": ["Check LDL after Atorvastatin; a value of 999 was noted."],
+    "data_gaps": [],
+    "patient_draft": {"headline": "Your blood pressure was 125/80 at your last visit.",
+                      "points": ["Your cholesterol went up from 120 to 150.", "It was 777 last time."],
+                      "next_step": "Talk about these results with your doctor at your next visit."},
+}
+
+
+class GeminiSummaryTests(RecordSummaryTests.__base__):
+    request = RecordSummaryTests.request
+
+    async def test_gemini_writes_doctor_version_and_patient_draft(self):
+        db = FakeSupa({"id": "TEST-A1", "report": {"review_priority": "REVIEW"}, "monitoring": MONITORING})
+        result = await self.request(db, AsyncMock(return_value=(json.loads(json.dumps(GEMINI_ANSWER)), "test-model")))
+        summary, draft = result["ai_summary"], result["patient_draft"]
+        self.assertEqual(summary["format"], llm.SUMMARY_FORMAT)
+        self.assertEqual(result["summary_model"], "test-model")
+        self.assertIsNone(result["fallback_reason"])
+        self.assertEqual(summary["unverified_numbers"], ["999"])
+        self.assertEqual(draft["headline"], GEMINI_ANSWER["patient_draft"]["headline"])
+        self.assertEqual(draft["unverified_numbers"], ["777"])
+        self.assertFalse(draft["publishable"])  # an untraceable number blocks publishing
+        # The prompt carries the trend, reasons and treatment responses.
+        sent = json.loads(self.model.call_args.args[1][0]["content"])
+        self.assertEqual(sent["monitoring"]["health_trend"], "WORSENING")
+        self.assertEqual(sent["monitoring"]["treatment_responses"][0]["medicine"], "Atorvastatin")
+        self.assertEqual(sent["recent_consultations"][0]["visit_id"], "TEST-V1")
+
+    async def test_patient_draft_is_never_stored_in_a_patient_readable_field(self):
+        db = FakeSupa({"id": "TEST-A1", "report": {}, "monitoring": MONITORING})
+        await self.request(db, AsyncMock(return_value=(json.loads(json.dumps(GEMINI_ANSWER)), "test-model")))
+        stored = json.dumps(db.updates)
+        self.assertNotIn("patient_draft", stored)
+        self.assertNotIn(GEMINI_ANSWER["patient_draft"]["headline"], stored)
+        self.assertNotIn(GEMINI_ANSWER["patient_draft"]["next_step"], stored)
+
+    async def test_patient_draft_is_kept_for_the_doctor_once_v14_locks_assessments(self):
+        db = FakeSupa({"id": "TEST-A1", "report": {}, "monitoring": MONITORING}, v14=True)
+        await self.request(db, AsyncMock(return_value=(json.loads(json.dumps(GEMINI_ANSWER)), "test-model")))
+        stored = db.updates[0]["ai_summary"]["patient_draft"]
+        self.assertEqual(stored["headline"], GEMINI_ANSWER["patient_draft"]["headline"])
+        self.assertFalse(stored["publishable"])
+
+    async def test_quota_error_falls_back_to_record_summary(self):
+        db = FakeSupa({"id": "TEST-A1", "report": {}})
+        result = await self.request(db, AsyncMock(side_effect=HTTPException(429, "The free AI quota is used up for now.")))
+        self.assertEqual(result["summary_model"], "record-summary-v2")
+        self.assertEqual(result["ai_summary"]["format"], "clinical-highlights-v1")
+        self.assertIn("quota", result["fallback_reason"])
+        self.assertEqual(result["ai_summary"]["fallback_reason"], result["fallback_reason"])
+        self.assertIsNone(result["patient_draft"])
+
+    async def test_summary_without_an_assessment_still_uses_gemini(self):
+        db = FakeSupa()
+        result = await self.request(db, AsyncMock(return_value=(json.loads(json.dumps(GEMINI_ANSWER)), "test-model")))
+        self.assertIsNone(result["assessment_id"])
+        self.assertEqual(result["ai_summary"]["format"], llm.SUMMARY_FORMAT)
+        sent = json.loads(self.model.call_args.args[1][0]["content"])
+        self.assertIsNone(sent["monitoring"])
+        self.assertIsNone(sent["review_priority"])
+        self.assertEqual(db.updates, [])
 
 
 if __name__ == "__main__":

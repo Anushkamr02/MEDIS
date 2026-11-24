@@ -42,6 +42,15 @@ Two rules that the whole design rests on:
    do not introduce one. Frontend calls go through `aiRequest()` in
    [frontend/src/lib/aiClient.js](frontend/src/lib/aiClient.js), which attaches the
    Supabase session token and returns `{ data, error }` like supabase-js.
+3. **No family or caregiver access.** Only the patient and doctors the patient
+   granted access can read a record; `request_patient_access()` rejects any
+   non-doctor account. The emergency contact is a phone number only: it gets no
+   notifications and no data. Caregiver access would need explicit, scoped,
+   revocable patient consent, audit of every use and no AI findings, and is out
+   of scope. AI output (assessments, ECG classifications, reviews, queue,
+   escalations) has no patient policy at all; patients see only summaries a
+   doctor reviewed and published (v14). `supabase/governance_check.sql` checks
+   all of this against a real database.
 
 ## Layout
 
@@ -92,7 +101,7 @@ The shell here is PowerShell; the Bash tool is also available. Use each tool's o
 ## Database / migrations
 
 Migrations are plain SQL run by hand in the Supabase SQL editor, **in order**:
-`v1, v2, v3, v3b, v3c, v3d, v3e, v3f, v4 … v11` (`v1`–`v3b` predate this repo's
+`v1, v2, v3, v3b, v3c, v3d, v3e, v3f, v4 … v15` (`v1`–`v3b` predate this repo's
 `supabase/` folder). They are written to be **safe to re-run** (`create or replace`,
 `if not exists`) — keep new ones idempotent and in a `begin; … commit;` block.
 
@@ -107,6 +116,24 @@ Migrations are plain SQL run by hand in the Supabase SQL editor, **in order**:
   RPCs return the request state and list `access_requested` / `emergency_access`.
   The frontend falls back to the pre-v11 upsert when the RPC is missing
   (`isLegacyAccessSchema` in `lib/patientAccess.js`).
+- `v12` — continuous monitoring: trigger/trend/`monitoring` columns on `cad_assessments`,
+  `monitoring_queue` (filled by triggers on finalized visits, prescriptions, verified reports),
+  daily pg_cron `medis_monitoring_due`, doctor-only "Patient worsening" notifications.
+  Processed by `POST /ai/monitor/{patient_id}` and `POST /ai/monitor/queue`; the backend
+  falls back to saving without the new columns when v12 isn't applied (`missing_schema`).
+- `v13` — `finding_reviews` (doctor-only, no patient policy) and `record_finding_review()`, which
+  checks active access and writes the `reviewed_finding` audit row. Significance rule and outcome
+  labels live in `lib/findingReview.js`; the review UI hides without v13.
+- `v14` — patients can no longer read `cad_assessments`; `patient_health_summaries` (immutable, patient reads own
+  non-withdrawn rows) written only by `publish_health_summary()` (requires a review when the assessment has a
+  significant finding) and `withdraw_health_summary()`. Doctor UI `ai/PublishSummary.jsx`, patient card
+  `HealthSummary.jsx`; both hide without v14.
+- `v15` — escalation of unreviewed urgent findings (latest check Critical, validated ECG possible MI):
+  `escalation_events`, `escalate_finding()`, insert triggers (level 0 at once) and hourly pg_cron
+  `medis_escalate_urgent` (level 1 at 4 h, level 2 at 24 h; limits in `medis_escalation_after()`); every
+  step is audited with no actor (`audit_logs.user_id` is now nullable) and stops once a review exists.
+  Also adds `viewed_clinical_insights` to `log_patient_access()` and the access history. Labels in
+  `lib/escalation.js`. Run `supabase/governance_check.sql` afterwards (it rolls back).
 
 When a change needs schema, add the next numbered file **and** say in your summary
 that the user must apply it in Supabase — nothing applies migrations automatically.

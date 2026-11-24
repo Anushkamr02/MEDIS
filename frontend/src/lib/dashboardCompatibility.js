@@ -4,6 +4,17 @@ export function isMissingRpc(error) {
   return error?.code === 'PGRST202';
 }
 
+// A column added by a later migration (e.g. v12 health_trend) that this
+// database doesn't have yet.
+export function isMissingColumn(error) {
+  return error?.code === '42703' || error?.code === 'PGRST204';
+}
+
+// A table or RPC added by a later migration (e.g. v13 finding_reviews).
+export function isMissingTable(error) {
+  return ['PGRST205', '42P01', 'PGRST202'].includes(error?.code);
+}
+
 export async function loadVisitDetails(client, visit) {
   const result = await client.rpc('get_patient_visit_details', {
     p_consultation_id: visit.consultation_id,

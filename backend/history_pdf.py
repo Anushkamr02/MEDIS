@@ -133,12 +133,13 @@ def build_session(profile, details, history, family, doctors, consultations, pre
     return db, patient_id
 
 
-def render(path, *rows, ai_report=None, include_ai=True):
+def render(path, *rows, ai_report=None, include_ai=True, health_summary=None):
     from medis.reports.medical_history_pdf import generate_patient_medical_history_pdf
 
     db, patient_id = build_session(*rows)
     try:
         generate_patient_medical_history_pdf(patient_id, db, output_filename=str(path),
-                                             ai_report=ai_report, include_ai=include_ai)
+                                             ai_report=ai_report, include_ai=include_ai,
+                                             health_summary=health_summary)
     finally:
         db.close()

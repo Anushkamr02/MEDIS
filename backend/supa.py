@@ -76,9 +76,14 @@ class Supa:
                                        headers={"Prefer": "return=representation"})
         return response.json()[0]
 
-    async def update(self, table, match, values):
-        """PATCH rows matching {column: value}; returns the updated rows."""
-        params = {column: f"eq.{value}" for column, value in match.items()}
+    async def insert_ignore(self, table, rows, on_conflict):
+        """Inserts rows, silently skipping any that clash on the on_conflict column."""
+        await self._request("POST", f"/rest/v1/{table}", params={"on_conflict": on_conflict}, json=rows,
+                            headers={"Prefer": "resolution=ignore-duplicates,return=minimal"})
+
+    async def update(self, table, match, values, filters=None):
+        """PATCH rows matching {column: value} (plus raw PostgREST filters); returns the updated rows."""
+        params = {**{column: f"eq.{value}" for column, value in match.items()}, **(filters or {})}
         response = await self._request("PATCH", f"/rest/v1/{table}", params=params, json=values,
                                        headers={"Prefer": "return=representation"})
         return response.json()

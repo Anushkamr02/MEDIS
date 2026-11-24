@@ -18,7 +18,6 @@ export function usePatientData(patientId) {
     hospitals: [],
     visits: [],
     accessHistory: [],
-    ecgAnalyses: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -40,7 +39,6 @@ export function usePatientData(patientId) {
         hospitalsRes,
         visitsRes,
         accessRes,
-        ecgRes,
       ] = await Promise.all([
         supabase.from('patient_profiles').select('*').eq('id', patientId).maybeSingle(),
         supabase
@@ -83,13 +81,7 @@ export function usePatientData(patientId) {
         // and every doctor who has accessed this record — migration v3f.
         supabase.rpc('get_patient_visits', { p_patient_id: patientId }),
         supabase.rpc('get_patient_access_history', { p_patient_id: patientId }),
-        // Latest ECG results, for the health overview on the dashboard
-        supabase
-          .from('ecg_analyses')
-          .select('id, created_at, status, classification, file_name, result')
-          .eq('patient_id', patientId)
-          .order('created_at', { ascending: false })
-          .limit(5),
+        // No ecg_analyses: ECG classifications are doctor-only Clinical Insights (§3.1).
       ]);
 
       // Surface the first error found, but still show whatever did load
@@ -103,8 +95,7 @@ export function usePatientData(patientId) {
         documentsRes.error ||
         hospitalsRes.error ||
         visitsRes.error ||
-        accessRes.error ||
-        ecgRes.error;
+        accessRes.error;
       if (firstError) setError(firstError.message);
 
       setData({
@@ -118,7 +109,6 @@ export function usePatientData(patientId) {
         hospitals: hospitalsRes.data ?? [],
         visits: visitsRes.data ?? [],
         accessHistory: accessRes.data ?? [],
-        ecgAnalyses: ecgRes.data ?? [],
       });
     } catch (err) {
       setError(err.message);

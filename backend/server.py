@@ -4,6 +4,8 @@ Supabase stays the system of record (auth, RLS, storage). This service only
 runs the analysis engines on data read with the caller's own token:
 
   POST /ai/longitudinal/{patient_id}   trend screening (+ optional legacy PCE)
+  POST /ai/monitor/{patient_id}        re-check after a visit / prescription / report (saves the trend)
+  POST /ai/monitor/queue               process patients queued by the database (migration v12)
   POST /ai/ecg/document/{document_id}  ECG analysis of an uploaded PDF/image
   POST /ai/ecg/upload                  ECG analysis of digital files (WFDB/CSV/NPY)
   POST /ai/extract-report/{document_id} OCR lab values for the doctor to verify
@@ -21,7 +23,7 @@ import shutil
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,8 +37,9 @@ from record_summary import summarize_records
 from adapters import consultations_to_visits, extracted_to_rows, compact_lead_samples
 from medis.ai.ascvd import calculate_pce
 from medis.ai.longitudinal_analysis import ENGINE_VERSION, assess_timeline
+from medis.ai.monitoring import assess_monitoring
 from medis.config import MODELS
-from medis.web.routes import MAX_FILE_BYTES, LegacyRiskInputs, analyze_uploads, json_safe
+from medis.ecg_upload import MAX_FILE_BYTES, LegacyRiskInputs, analyze_uploads, json_safe
 from supa import ALLOWED_ORIGINS, Supa
 
 # File types the ECG engine reads directly (medis.ecg_inference.FORMAT_MAP)
@@ -88,6 +91,7 @@ ACCESS_EVENTS = {
     "ai_ecg_analysis": "ran_ai_analysis",
     "ai_report_extraction": "ran_ai_analysis",
     "ai_summary": "ran_ai_analysis",
+    "ai_monitoring": "ran_ai_analysis",
     "history_pdf_export": "generated_history_pdf",
     "prescription_pdf_export": "downloaded_document",
 }
@@ -163,36 +167,128 @@ class LongitudinalRequest(BaseModel):
     save: bool = True
 
 
-@app.post("/ai/longitudinal/{patient_id}")
-async def longitudinal(patient_id: str, body: LongitudinalRequest, ctx=Depends(current_doctor)):
-    supa, user = ctx
-    await require_patient_access(supa, patient_id)
+def missing_schema(exc):
+    """True when PostgREST rejects a column or table an older migration doesn't have."""
+    detail = str(exc.detail)
+    return exc.status_code in (400, 404) and any(code in detail for code in ("PGRST204", "PGRST205", "42703", "42P01"))
+
+
+async def run_assessment(supa, user, patient_id, *, consultation_id=None, draft_values=None, pce_inputs=None,
+                         save=True, trigger_event="manual", trigger_ref=None):
+    """Trend screening plus monitoring for one patient, saved as one cad_assessments row."""
     consultations = await supa.select("consultations", {
         "select": "*,hospitals(name)", "patient_id": f"eq.{patient_id}", "order": "consultation_date.asc"})
     # Finalized visits from every doctor, plus the doctor's current draft if asked
-    consultations = [c for c in consultations if c["status"] != "pending" or c["id"] == body.consultation_id]
+    consultations = [c for c in consultations if c["status"] != "pending" or c["id"] == consultation_id]
     prescriptions = await supa.select("prescriptions", {
         "select": "id,consultation_id,issued_at,medicines", "patient_id": f"eq.{patient_id}"})
-    drafts = {body.consultation_id: body.draft_values} if body.consultation_id and body.draft_values else None
+    drafts = {consultation_id: draft_values} if consultation_id and draft_values else None
     visits = consultations_to_visits(consultations, prescriptions, drafts)
 
     as_of = date.today()
     report = assess_timeline(visits, as_of=as_of)
-    pce = calculate_pce(body.pce_inputs.model_dump(mode="json"), as_of=as_of) if body.pce_inputs else None
+    pce = calculate_pce(pce_inputs.model_dump(mode="json"), as_of=as_of) if pce_inputs else None
     if pce:
         report["absolute_risk"] = pce
     report = json_safe(report)
 
+    previous = await supa.select("cad_assessments", {
+        "select": "id,review_priority", "patient_id": f"eq.{patient_id}", "order": "created_at.desc", "limit": "1"})
+    previous = previous[0] if previous else None
+    monitoring = json_safe(assess_monitoring(report, previous, visits, as_of=as_of))
+
     assessment_id = None
-    if body.save:
-        row = await supa.insert("cad_assessments", {
-            "patient_id": patient_id, "consultation_id": body.consultation_id, "requested_by": user["id"],
-            "engine_version": report["engine_version"], "as_of": report["as_of"],
-            "review_priority": report["review_priority"], "report": report, "pce": pce})
-        assessment_id = row["id"]
-        await audit(supa, user, "ai_longitudinal_assessment", patient_id,
-                    {"assessment_id": assessment_id, "review_priority": report["review_priority"]})
-    return {"assessment_id": assessment_id, "report": report, "pce": pce}
+    if save:
+        row = {"patient_id": patient_id, "consultation_id": consultation_id, "requested_by": user["id"],
+               "engine_version": report["engine_version"], "as_of": report["as_of"],
+               "review_priority": report["review_priority"], "report": report, "pce": pce}
+        try:
+            saved = await supa.insert("cad_assessments", {
+                **row, "trigger_event": trigger_event, "trigger_ref": trigger_ref,
+                "previous_assessment_id": previous["id"] if previous else None,
+                "health_trend": monitoring["health_trend"], "monitoring": monitoring})
+        except HTTPException as exc:
+            if not missing_schema(exc):
+                raise
+            saved = await supa.insert("cad_assessments", row)  # v12 not applied yet
+        assessment_id = saved["id"]
+        await audit(supa, user, "ai_longitudinal_assessment" if trigger_event == "manual" else "ai_monitoring",
+                    patient_id, {"assessment_id": assessment_id, "review_priority": report["review_priority"],
+                                 "health_trend": monitoring["health_trend"], "trigger_event": trigger_event})
+    return {"assessment_id": assessment_id, "report": report, "pce": pce, "monitoring": monitoring}
+
+
+@app.post("/ai/longitudinal/{patient_id}")
+async def longitudinal(patient_id: str, body: LongitudinalRequest, ctx=Depends(current_doctor)):
+    supa, user = ctx
+    await require_patient_access(supa, patient_id)
+    return await run_assessment(supa, user, patient_id, consultation_id=body.consultation_id,
+                                draft_values=body.draft_values, pce_inputs=body.pce_inputs, save=body.save)
+
+
+# ---------- continuous monitoring ----------
+
+MONITOR_QUEUE_PATIENTS = 10  # per call, so the dashboard stays responsive
+
+
+class MonitorRequest(BaseModel):
+    trigger_event: Literal["visit_finalized", "prescription_issued", "report_verified", "manual"] = "manual"
+    trigger_ref: Optional[str] = None
+
+
+async def monitor_patient(supa, user, patient_id, trigger_event, trigger_ref=None):
+    result = await run_assessment(supa, user, patient_id, trigger_event=trigger_event, trigger_ref=trigger_ref)
+    monitoring = result["monitoring"]
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        # Due rows for this patient are covered by this run; future follow-ups stay queued.
+        await supa.update("monitoring_queue", {"patient_id": patient_id}, {"processed_at": now},
+                          filters={"processed_at": "is.null", "due_at": f"lte.{now}"})
+        follow_ups = [{
+            "patient_id": patient_id, "reason": "treatment_follow_up",
+            "dedupe_key": f"follow_up:{patient_id}:{t['medicine'].lower()}:{t['metric']}:{t['started']}",
+            "due_at": t["due_from"],
+            "detail": {"medicine": t["medicine"], "metric": t["metric"], "metric_label": t["metric_label"],
+                       "started": t["started"], "due_by": t["due_by"]},
+        } for t in monitoring["treatment_responses"] if t["status"] == "awaiting_follow_up"]
+        if follow_ups:
+            await supa.insert_ignore("monitoring_queue", follow_ups, on_conflict="dedupe_key")
+    except HTTPException as exc:
+        if not missing_schema(exc):
+            raise
+    return {"patient_id": patient_id, "assessment_id": result["assessment_id"],
+            "review_priority": result["report"]["review_priority"], "health_trend": monitoring["health_trend"],
+            "reasons": monitoring["reasons"], "treatment_responses": monitoring["treatment_responses"]}
+
+
+# Declared before /ai/monitor/{patient_id} so "queue" is not read as a patient id.
+@app.post("/ai/monitor/queue")
+async def monitor_queue(ctx=Depends(current_doctor)):
+    """Re-checks patients the database queued (RLS limits rows to this doctor's patients)."""
+    supa, user = ctx
+    try:
+        rows = await supa.select("monitoring_queue", {
+            "select": "patient_id,reason", "processed_at": "is.null",
+            "due_at": f"lte.{datetime.now(timezone.utc).isoformat()}", "order": "created_at.asc", "limit": "200"})
+    except HTTPException as exc:
+        if missing_schema(exc):
+            return {"processed": [], "failed": [], "remaining": 0, "unavailable": True}
+        raise
+    patients = list(dict.fromkeys(row["patient_id"] for row in rows))
+    processed, failed = [], []
+    for patient_id in patients[:MONITOR_QUEUE_PATIENTS]:
+        try:
+            processed.append(await monitor_patient(supa, user, patient_id, "queued_recheck"))
+        except HTTPException as exc:
+            failed.append({"patient_id": patient_id, "error": exc.detail})  # stays queued for next time
+    return {"processed": processed, "failed": failed, "remaining": max(0, len(patients) - MONITOR_QUEUE_PATIENTS)}
+
+
+@app.post("/ai/monitor/{patient_id}")
+async def monitor(patient_id: str, body: MonitorRequest, ctx=Depends(current_doctor)):
+    supa, user = ctx
+    await require_patient_access(supa, patient_id)
+    return await monitor_patient(supa, user, patient_id, body.trigger_event, body.trigger_ref)
 
 
 # ---------- ECG ----------
@@ -370,6 +466,28 @@ async def prescription_pdf(prescription_id: str, ctx=Depends(current_user)):
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+async def assessments_locked(supa):
+    """True once migration v14 (patient_health_summaries, no patient access to assessments) is live."""
+    try:
+        await supa.select("patient_health_summaries", {"select": "id", "limit": "0"})
+        return True
+    except HTTPException:
+        return False
+
+
+async def latest_published_summary(supa, patient_id):
+    try:
+        rows = await supa.select("patient_health_summaries", {
+            "select": "status_message,headline,points,next_step,shown_metrics,published_at,profiles:published_by(full_name)",
+            "patient_id": f"eq.{patient_id}", "withdrawn_at": "is.null", "order": "published_at.desc", "limit": "1"})
+    except HTTPException:
+        return None  # migration v14 not applied yet: nothing is published
+    if not rows:
+        return None
+    row = rows[0]
+    return {**row, "doctor": (row.pop("profiles", None) or {}).get("full_name")}
+
+
 async def latest_shared_assessment(supa, patient_id):
     try:
         rows = await supa.select("cad_assessments", {
@@ -383,8 +501,8 @@ async def latest_shared_assessment(supa, patient_id):
 @app.get("/pdf/history/{patient_id}")
 async def history_pdf(patient_id: str, ctx=Depends(current_user)):
     """Doctors get every finalized visit plus a fresh screening section. A patient
-    gets their own copy: shared visits only, and the AI section only when their
-    doctor has shared an assessment (that reviewed assessment is printed)."""
+    gets their own copy: shared visits only, never the AI section, and the health
+    summary their doctor published (migration v14), if any."""
     supa, user = ctx
     is_patient = user["role"] == "patient"
     if is_patient and patient_id != user["id"]:
@@ -407,11 +525,7 @@ async def history_pdf(patient_id: str, ctx=Depends(current_user)):
         "select": "consultation_id,created_at,file_name,input_format,status,result", "patient_id": f"eq.{patient_id}"})
     ai = {}
     if is_patient:
-        shared = await latest_shared_assessment(supa, patient_id)
-        report = (shared or {}).get("report")
-        ai = {"include_ai": bool(report),
-              "ai_report": {**report, "visits_analyzed_count": (report.get("coverage") or {}).get("valid_visits", 0)}
-              if report else None}
+        ai = {"include_ai": False, "health_summary": await latest_published_summary(supa, patient_id)}
 
     doctor_ids = sorted({c["doctor_id"] for c in consultations} | {rx["doctor_id"] for rx in prescriptions})
     doctors = await supa.select("profiles", {"select": "id,full_name,display_id,email",
@@ -445,11 +559,16 @@ class SummaryRequest(BaseModel):
 @app.post("/ai/summary/{patient_id}")
 async def ai_summary(patient_id: str, body: SummaryRequest, ctx=Depends(current_doctor)):
     supa, user = ctx
-    await require_patient_access(supa, patient_id)
-    params = {"select": "id", "patient_id": f"eq.{patient_id}", "order": "created_at.desc", "limit": "1"}
+    patient = await require_patient_access(supa, patient_id)
+    params = {"select": "id,report,monitoring", "patient_id": f"eq.{patient_id}", "order": "created_at.desc", "limit": "1"}
     if body.assessment_id:
         params["id"] = f"eq.{body.assessment_id}"
-    assessments = await supa.select("cad_assessments", params)
+    try:
+        assessments = await supa.select("cad_assessments", params)
+    except HTTPException as exc:
+        if not missing_schema(exc):
+            raise
+        assessments = await supa.select("cad_assessments", {**params, "select": "id,report"})  # before v12
     if not assessments and body.assessment_id:
         raise HTTPException(404, "The selected assessment was not found for this patient.")
     assessment = assessments[0] if assessments else None
@@ -475,16 +594,36 @@ async def ai_summary(patient_id: str, body: SummaryRequest, ctx=Depends(current_
         "select": "condition_name", "patient_id": f"eq.{patient_id}", "is_active": "eq.true"})
     source["patient"]["recorded_conditions"] = [row["condition_name"] for row in conditions if row.get("condition_name")]
     source["profile_bmi"] = details.get("bmi")
-    summary, model = summarize_records(source), "record-summary-v2"
+
+    gemini_input = llm.summary_input(
+        (assessment or {}).get("report"), patient, details, medications,
+        [{"date": c["date"], "diagnosis": c["diagnosis"]} for c in consultations if c.get("status") == "completed" and c.get("diagnosis")],
+        age_from_dob(patient.get("date_of_birth")), monitoring=(assessment or {}).get("monitoring"), consultations=consultations)
+    patient_draft, fallback_reason = None, None
+    try:
+        answer, model = await llm.generate_json(llm.SUMMARY_SYSTEM, [{"role": "user", "content": json.dumps(gemini_input, default=str)}],
+                                                llm.SUMMARY_SCHEMA, effort="medium")
+        patient_draft = answer.pop("patient_draft")
+        patient_draft["unverified_numbers"] = llm.unverified_numbers(patient_draft, gemini_input)
+        # A number that can't be traced to the record must be corrected before anything is published.
+        patient_draft["publishable"] = not patient_draft["unverified_numbers"]
+        summary = {"format": llm.SUMMARY_FORMAT, **answer, "unverified_numbers": llm.unverified_numbers(answer, gemini_input)}
+    except (HTTPException, KeyError, TypeError) as exc:
+        # Gemini down, out of quota, unconfigured or malformed: the rule-based summary still works.
+        fallback_reason = exc.detail if isinstance(exc, HTTPException) else "The AI returned an incomplete answer."
+        summary, model = {**summarize_records(source), "fallback_reason": fallback_reason}, "record-summary-v2"
 
     created_at = datetime.now(timezone.utc).isoformat()
+    # Before migration v14 a shared cad_assessments row is patient-readable, so the patient draft
+    # is only returned to the doctor. Once v14 locks the table it is kept with the doctor version.
     if assessment:
+        stored = {**summary, "patient_draft": patient_draft} if patient_draft and await assessments_locked(supa) else summary
         await supa.update("cad_assessments", {"id": assessment["id"]},
-                          {"ai_summary": summary, "summary_model": model, "summary_created_at": created_at})
+                          {"ai_summary": stored, "summary_model": model, "summary_created_at": created_at})
     assessment_id = assessment["id"] if assessment else None
     await audit(supa, user, "ai_summary", patient_id, {"assessment_id": assessment_id, "model": model})
     return {"assessment_id": assessment_id, "ai_summary": summary, "summary_model": model,
-            "summary_created_at": created_at}
+            "summary_created_at": created_at, "patient_draft": patient_draft, "fallback_reason": fallback_reason}
 
 
 # ---------- patient chatbot "Ask MEDIS" (Gemini) ----------

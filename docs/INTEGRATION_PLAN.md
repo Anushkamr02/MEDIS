@@ -278,3 +278,15 @@ MEDIS keeps working.**
 | The LLM invents details | Structured input only, a number check, citations to visits, and the doctor reviews before sharing |
 | The patient chatbot misses an emergency | Hard-coded emergency path that skips the LLM |
 | Data leaks between patients | Every read uses the caller's JWT, so RLS applies. No service-role key in the AI service. |
+
+## 11. Access policy: no family or caregiver access
+
+- MEDIS has **no family or caregiver access**. Only the patient and doctors the patient granted
+  access (v11) can read a record; `request_patient_access()` rejects any non-doctor account.
+- The emergency contact is stored as a phone number only. It receives no notifications and no data.
+- AI output (assessments, ECG classifications, reviews, the re-check queue, escalations) is
+  doctor-only. Patients see only health summaries a doctor reviewed and published (v14).
+- Future caregiver access would need explicit patient consent scoped to specific data, the ability
+  to revoke it, audit of every use, and no AI findings. It is out of scope.
+- `supabase/governance_check.sql` verifies these rules against a real database; it rolls back
+  everything it writes.

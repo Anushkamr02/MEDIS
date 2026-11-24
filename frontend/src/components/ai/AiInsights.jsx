@@ -9,7 +9,9 @@ import { AIBadge, AIDisclaimer, EmptyState, PriorityPill, ServiceUnavailable, Sp
 import { METRIC_INFO, TrendCharts } from './TrendChart';
 import AiSummary from './AiSummary';
 import DigitalEcgUpload from './DigitalEcgUpload';
-import ShareAssessment from './ShareAssessment';
+import PublishSummary from './PublishSummary';
+import FindingReview from './FindingReview';
+import { assessmentFindings } from '../../lib/findingReview';
 
 function Flags({ flags, chip }) {
   const [open, setOpen] = useState(null);
@@ -72,7 +74,7 @@ function Flags({ flags, chip }) {
  * compact, on the consultation page, where getDraftValues lets the doctor
  * preview how the unsaved visit changes the trend (previews are not saved).
  */
-export default function AiInsights({ patientId, consultationId, getDraftValues, compact = false, onOpenVisit, reviewRequested = false }) {
+export default function AiInsights({ patientId, consultationId, getDraftValues, compact = false, onOpenVisit, onAnalysed, reviewRequested = false }) {
   const [assessment, setAssessment] = useState(null); // cad_assessments row (+ preview flag)
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -130,6 +132,7 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
       preview: !!draft,
       ai_summary: null,
     });
+    if (!draft) onAnalysed?.();
   }
 
   const report = assessment?.report;
@@ -217,6 +220,16 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {assessment.preview ? 'Preview including this unsaved visit (not saved). ' : ''}The review priority is a screening label, not a probability.
               </p>
+              {!assessment.preview && assessment.id && (
+                <div className="mt-2">
+                  <FindingReview
+                    patientId={patientId}
+                    assessmentId={assessment.id}
+                    findings={assessmentFindings(assessment)}
+                    evidence={[...(assessment.monitoring?.reasons ?? []), ...(report.clinical_flags ?? []).map((f) => f.message)]}
+                  />
+                </div>
+              )}
             </div>
             {full && (
               <>
@@ -225,15 +238,7 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
                   assessment={assessment}
                   onSaved={(saved) => setAssessment((prev) => ({ ...prev, ...saved }))}
                   onOpenVisit={onOpenVisit}
-                  footer={
-                    !compact && (
-                      <ShareAssessment
-                        key={assessment.id ?? 'preview'}
-                        assessment={assessment}
-                        onChange={(saved) => setAssessment((prev) => ({ ...prev, ...saved }))}
-                      />
-                    )
-                  }
+                  footer={!compact && <PublishSummary key={assessment.id ?? 'preview'} patientId={patientId} assessment={assessment} />}
                 />
                 <div className="rounded-lg border p-3">
                   <h3 className="mb-2 text-sm font-semibold">Trends</h3>

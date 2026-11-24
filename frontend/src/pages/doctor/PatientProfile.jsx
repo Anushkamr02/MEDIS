@@ -19,7 +19,9 @@ import PrescriptionsPanel from '../../components/PrescriptionsPanel';
 import AccessEventsPanel from '../../components/AccessEventsPanel';
 import AccessHistory from '../../components/AccessHistory';
 import AiInsights from '../../components/ai/AiInsights';
+import MonitoringTimeline from '../../components/ai/MonitoringTimeline';
 import EcgAnalysis from '../../components/ai/EcgAnalysis';
+import ClinicalInsights from '../../components/ai/ClinicalInsights';
 import DocumentAiActions from '../../components/ai/DocumentAiActions';
 import PrescriptionPdfButton from '../../components/ai/PrescriptionPdfButton';
 
@@ -89,6 +91,7 @@ export default function PatientProfile() {
   } = usePatientRecord(patientId);
 
   const [panel, setPanel] = useState(null);
+  const [monitoringKey, setMonitoringKey] = useState(0);
   const [updatingDocId, setUpdatingDocId] = useState(null);
   const loggedView = useRef(false);
 
@@ -278,14 +281,18 @@ export default function PatientProfile() {
           <>
             {!details && <WarningState>This patient hasn't completed their onboarding profile yet. Vitals and lifestyle details are missing.</WarningState>}
 
-            <AiInsights
-              patientId={patientId}
-              reviewRequested={searchParams.get('review') === 'ai'}
-              onOpenVisit={(visitId) => {
-                const v = visits.find((x) => x.visit_id === visitId);
-                if (v) navigate(`/doctor/consultations/${v.consultation_id}`);
-              }}
-            />
+            <ClinicalInsights patientId={patientId}>
+              <AiInsights
+                patientId={patientId}
+                reviewRequested={searchParams.get('review') === 'ai'}
+                onAnalysed={() => setMonitoringKey((k) => k + 1)}
+                onOpenVisit={(visitId) => {
+                  const v = visits.find((x) => x.visit_id === visitId);
+                  if (v) navigate(`/doctor/consultations/${v.consultation_id}`);
+                }}
+              />
+              <MonitoringTimeline key={monitoringKey} patientId={patientId} />
+            </ClinicalInsights>
 
             <div className="grid min-w-0 gap-5 lg:grid-cols-2">
               <Section title="Vitals & lifestyle">
@@ -379,9 +386,11 @@ export default function PatientProfile() {
 
         {/* ---------- ECG Analysis ---------- */}
         {tab === 'ecg' && (
-          <Section title="ECG analysis" icon={<HeartPulse className="h-4 w-4 text-primary" />}>
-            <EcgAnalysis patientId={patientId} documents={documents} />
-          </Section>
+          <ClinicalInsights patientId={patientId}>
+            <Section title="ECG analysis" icon={<HeartPulse className="h-4 w-4 text-primary" />}>
+              <EcgAnalysis patientId={patientId} documents={documents} />
+            </Section>
+          </ClinicalInsights>
         )}
 
         {/* ---------- Add Record & Medical Documents ---------- */}

@@ -37,8 +37,8 @@ function todayIso() {
 
 /**
  * Book and manage this doctor's appointments. Can be opened with
- * ?patient=<uuid>&consultation=<uuid>&date=YYYY-MM-DD (from the
- * consultation page's "Book follow-up") to prefill the form.
+ * ?patient=<uuid>&consultation=<uuid>&date=YYYY-MM-DD&reason=<text> (from the
+ * consultation page's "Book follow-up" or a finding review) to prefill the form.
  * Double-booking is blocked by the check_appointment_conflict trigger;
  * its error message is shown as-is.
  */
@@ -60,7 +60,7 @@ export default function DoctorAppointments() {
   const [date, setDate] = useState(searchParams.get('date') ?? '');
   const [time, setTime] = useState('10:00');
   const [duration, setDuration] = useState(30);
-  const [reason, setReason] = useState(consultationId ? 'Follow-up consultation' : '');
+  const [reason, setReason] = useState(searchParams.get('reason') ?? (consultationId ? 'Follow-up consultation' : ''));
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState('');
   const [cancelling, setCancelling] = useState(null); // appointment awaiting cancel confirmation

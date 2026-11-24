@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { isMissingColumn } from '../lib/dashboardCompatibility';
+import { REVIEWED_EVENT } from '../lib/findingReview';
 
 /**
  * Patients this doctor currently has access to (active assignment rows),
@@ -65,13 +67,16 @@ export function useAccessRequests(doctorId) {
 
 /**
  * Latest AI screening result per patient: { [patientId]: { review_priority,
- * created_at } }. Only the newest assessment counts, so a patient whose
+ * health_trend, reasons, created_at } }. Only the newest assessment counts, so a patient whose
  * latest run found no concern is not listed as critical for an older run.
  * RLS limits cad_assessments to patients assigned to this doctor.
+ * `monitoring` is false on a database without migration v12 (no trend yet).
  */
 export function useLatestPriorities(patientIds) {
   const [latest, setLatest] = useState({});
   const [loading, setLoading] = useState(true);
+  const [monitoring, setMonitoring] = useState(true);
+  const [version, setVersion] = useState(0);
   const key = [...patientIds].sort().join(',');
 
   useEffect(() => {
@@ -82,25 +87,139 @@ export function useLatestPriorities(patientIds) {
     }
     let cancelled = false;
     setLoading(true);
-    supabase
+    const query = (columns) => supabase
       .from('cad_assessments')
-      .select('patient_id, review_priority, created_at')
+      .select(columns)
       .in('patient_id', key.split(','))
       .order('created_at', { ascending: false })
-      .limit(1000)
-      .then(({ data }) => {
-        if (cancelled) return;
-        const byPatient = {};
-        for (const row of data ?? []) byPatient[row.patient_id] ??= row; // newest first
-        setLatest(byPatient);
-        setLoading(false);
-      });
+      .limit(1000);
+    (async () => {
+      let result = await query(
+        'id, patient_id, review_priority, created_at, health_trend, trigger_event, reasons:monitoring->reasons, treatments:monitoring->treatment_responses'
+      );
+      const legacy = isMissingColumn(result.error);
+      if (legacy) result = await query('id, patient_id, review_priority, created_at');
+      if (cancelled) return;
+      const byPatient = {};
+      for (const row of result.data ?? []) byPatient[row.patient_id] ??= row; // newest first
+      setMonitoring(!legacy);
+      setLatest(byPatient);
+      setLoading(false);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, version]);
 
-  return { latest, loading };
+  return { latest, loading, monitoring, refresh: useCallback(() => setVersion((v) => v + 1), []) };
+}
+
+/**
+ * Patients the database queued for a re-check (migration v12) that are due now.
+ * RLS limits monitoring_queue to this doctor's patients; empty without v12.
+ */
+export function useDueQueue(doctorId) {
+  const [patientIds, setPatientIds] = useState([]);
+
+  const fetchQueue = useCallback(async () => {
+    if (!doctorId) return;
+    const { data, error } = await supabase
+      .from('monitoring_queue')
+      .select('patient_id')
+      .is('processed_at', null)
+      .lte('due_at', new Date().toISOString())
+      .limit(200);
+    setPatientIds(error ? [] : [...new Set((data ?? []).map((r) => r.patient_id))]);
+  }, [doctorId]);
+
+  useEffect(() => {
+    fetchQueue();
+  }, [fetchQueue]);
+
+  return { patientIds, refresh: fetchQueue };
+}
+
+/**
+ * Inputs for the Overview's "Needs review" list (migration v13): the ids of
+ * findings that already have a review, and each patient's latest ECG.
+ * `available` is false on a database without v13. Reloads after any review.
+ */
+export function useFindingReviews(patientIds) {
+  const [state, setState] = useState({ available: false, reviewed: new Set(), ecgs: {} });
+  const [version, setVersion] = useState(0);
+  const key = [...patientIds].sort().join(',');
+
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    window.addEventListener(REVIEWED_EVENT, bump);
+    return () => window.removeEventListener(REVIEWED_EVENT, bump);
+  }, []);
+
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const ids = key.split(',');
+    (async () => {
+      const [reviews, ecgs] = await Promise.all([
+        supabase.from('finding_reviews').select('assessment_id, ecg_analysis_id').in('patient_id', ids).limit(1000),
+        supabase
+          .from('ecg_analyses')
+          .select('id, patient_id, created_at, status, classification, intervals:result->cardiac_intervals, valid:result->validation->overall_valid')
+          .in('patient_id', ids)
+          .order('created_at', { ascending: false })
+          .limit(1000),
+      ]);
+      if (cancelled) return;
+      const latestEcg = {};
+      for (const r of ecgs.data ?? []) {
+        latestEcg[r.patient_id] ??= { ...r, result: { cardiac_intervals: r.intervals ?? {}, validation: { overall_valid: r.valid } } };
+      }
+      setState({
+        available: !reviews.error,
+        reviewed: new Set((reviews.data ?? []).flatMap((r) => [r.assessment_id, r.ecg_analysis_id]).filter(Boolean)),
+        ecgs: latestEcg,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [key, version]);
+
+  return state;
+}
+
+/**
+ * Escalation steps for urgent findings of these patients (migration v15),
+ * newest first. RLS limits them to patients this doctor has access to;
+ * empty without v15. Reloads after any review, which stops escalation.
+ */
+export function useEscalations(patientIds) {
+  const [events, setEvents] = useState([]);
+  const [version, setVersion] = useState(0);
+  const key = [...patientIds].sort().join(',');
+
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    window.addEventListener(REVIEWED_EVENT, bump);
+    return () => window.removeEventListener(REVIEWED_EVENT, bump);
+  }, []);
+
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    supabase
+      .from('escalation_events')
+      .select('id, patient_id, assessment_id, ecg_analysis_id, level, reason, finding_at, created_at')
+      .in('patient_id', key.split(','))
+      .order('created_at', { ascending: false })
+      .limit(500)
+      .then(({ data, error }) => !cancelled && setEvents(error ? [] : data ?? []));
+    return () => {
+      cancelled = true;
+    };
+  }, [key, version]);
+
+  return events;
 }
 
 /**
