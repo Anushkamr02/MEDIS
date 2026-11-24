@@ -125,11 +125,17 @@ def unverified_numbers(summary, source):
 
 # ---------- doctor summary ----------
 
+SUMMARY_FORMAT = "gemini-summary-v1"
+
 SUMMARY_SYSTEM = """You write a short longitudinal summary of one patient for their doctor, inside MEDIS, a multi-hospital electronic health record used in India.
 
-The input JSON comes from a deterministic screening engine (rule-based trends across finalized visits at every hospital) plus the patient's current medications, known conditions and recent final diagnoses.
+The input JSON comes from a deterministic screening engine (rule-based trends across finalized visits at every hospital, may be absent), the monitoring result since the previous check (may be absent), the recent consultations, and the patient's current medications and known conditions.
 
-Rules:
+You write two texts:
+1. The doctor version (overview, changes, review_points, data_gaps): short, plain sentences with the real values and their dates. Include the monitoring trend (Improving / Stable / Worsening) and how each medicine is working when they are present, and say that the trend compares recorded values with the previous check and with targets.
+2. patient_draft: a starting text the doctor will edit before anything reaches the patient. Simple everyday words a patient without medical training understands, short sentences, calm and factual. Do not mention the review priority, flags, risk percentages, ECG classifications, the monitoring trend label or the words "AI" or "screening". You may restate measured values with their dates. Do not give a diagnosis, change medicines or tell the patient what their result means for their future; next_step only suggests discussing the results with their doctor or attending the planned follow-up.
+
+Rules for both:
 - Summarize available consultation notes, recorded diagnoses, medicines and readings even when there is only one consultation. An INSUFFICIENT_DATA trend status does not prevent a factual record summary. Do not use "insufficient data" as the summary or invent a trend from one reading. Describe what was recorded with its date; mention a specific limitation only when relevant to interpreting a finding.
 - Consultations with status pending are saved drafts: label them as not finalized and do not present their diagnoses or treatment entries as confirmed.
 - Use only facts and numbers present in the input. Do not calculate new numbers; restate the engine's values (first and latest values, change, percent change, dates).
@@ -159,14 +165,28 @@ SUMMARY_SCHEMA = {
         },
         "review_points": {"type": "array", "items": {"type": "string"}},
         "data_gaps": {"type": "array", "items": {"type": "string"}},
+        "patient_draft": {
+            "type": "object",
+            "properties": {
+                "headline": {"type": "string", "description": "One short sentence in simple words."},
+                "points": {"type": "array", "items": {"type": "string"}, "description": "2-4 simple points."},
+                "next_step": {"type": "string"},
+            },
+            "required": ["headline", "points", "next_step"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["overview", "changes", "review_points", "data_gaps"],
+    "required": ["overview", "changes", "review_points", "data_gaps", "patient_draft"],
     "additionalProperties": False,
 }
 
 
-def summary_input(report, patient, details, medications, diagnoses, age):
-    """Compact, stable JSON for the summary (no raw lead samples or UI fields)."""
+def summary_input(report, patient, details, medications, diagnoses, age, monitoring=None, consultations=None):
+    """Compact, stable JSON for the summary (no raw lead samples or UI fields).
+
+    Works without an assessment (report=None): the consultations still give a factual summary.
+    """
+    report = report or {}
     trajectories = {}
     for key, metric in report.get("metric_trajectories", {}).items():
         if not metric.get("count"):
@@ -201,6 +221,9 @@ def summary_input(report, patient, details, medications, diagnoses, age):
         "current_medications": [{"name": m.get("medicine_name"), "dosage": m.get("dosage"),
                                  "frequency": m.get("frequency"), "for": m.get("condition_name")} for m in medications],
         "recent_final_diagnoses": diagnoses,
+        "monitoring": ({"health_trend": monitoring.get("health_trend"), "reasons": monitoring.get("reasons", []),
+                        "treatment_responses": monitoring.get("treatment_responses", [])} if monitoring else None),
+        "recent_consultations": consultations or [],
     }
 
 

@@ -28,9 +28,9 @@ limitations are described in README.md and PROJECT_REVIEW.md.
 - Four historical aggregate ECG evaluation artifacts (not newly reproduced).
 - Documentation, bootstrap dependency list and per-file SHA-256 manifest.
 
-The existing gateway requires medis/web/ for route registration and static-directory
-mounting. Those support files are included so the unchanged entry point starts.
-A teammate using their own backend may import services directly instead.
+Note (Nov 2026): `medis/web/` and `medis/auth/` were later removed from the MEDIS repository;
+the helpers the AI service needs moved to `medis/ecg_upload.py`. The list above describes the
+original handoff.
 
 ## Intentionally separate inputs
 

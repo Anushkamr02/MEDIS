@@ -9,6 +9,8 @@ import { AIDisclaimer, EmptyState, ErrorState, Spinner } from '../medis';
 import DigitalEcgUpload from './DigitalEcgUpload';
 import DocumentAiActions from './DocumentAiActions';
 import EcgResult from './EcgResult';
+import FindingReview from './FindingReview';
+import { ecgFindings } from '../../lib/findingReview';
 
 /** Reused on the patient dashboard and consultation; only queries accessible results. */
 export default function EcgAnalysis({ patientId, consultationId, documents = [], compact = false }) {
@@ -51,6 +53,7 @@ export default function EcgAnalysis({ patientId, consultationId, documents = [],
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Latest ECG analysis</h3><Button size="sm" variant="outline" disabled={loading} onClick={load}>Refresh results</Button></div>
           {loading ? <Spinner text="Loading ECG results…" /> : latest ? <>
             <EcgResult key={latest.id} status={latest.status} classification={latest.classification} result={latest.result} fileName={latest.file_name} createdAt={latest.created_at} />
+            <FindingReview key={`review-${latest.id}`} patientId={patientId} ecgAnalysisId={latest.id} findings={ecgFindings(latest)} />
             {latest.document_id ? <Button size="sm" variant="outline" disabled={rerunning} onClick={() => rerun(latest)}>{rerunning ? 'Analysing…' : 'Re-run analysis'}</Button>
               : <p className="text-xs text-muted-foreground">To re-run a digital analysis, select the original recording above.</p>}
           </> : !error && <EmptyState text="No ECG analysed yet. Choose a stored report below or upload a digital recording." />}

@@ -225,7 +225,7 @@ Use status and quality fields before consuming classification. `classification`
 can be absent or `None`. Do not turn blocked/failed inference into a zero-risk result.
 Keep experimental short-signal CNN overrides disabled in normal use. Some results
 contain NumPy arrays; convert them to JSON-safe lists and nonfinite values to `null`
-when exposing your own API. [json_safe](./medis/web/routes.py) demonstrates this.
+when exposing your own API. [json_safe](./medis/ecg_upload.py) demonstrates this.
 
 ### B. Call the existing FastAPI service
 
@@ -262,13 +262,11 @@ Send `Authorization: Bearer <token>` where enforced. Authentication exists, but
 many existing clinical GET/POST routes currently lack authorization enforcement.
 Protect all patient operations and enforce patient/hospital access before deployment.
 
-**Packaging dependency:** the unchanged combined gateway imports
-[medis/web/routes.py](./medis/web/routes.py), which also registers backend endpoints
-and mounts a static directory. Keep `medis/web/` in an unchanged gateway handoff,
-even if the teammate never uses its presentation assets. For a strictly backend-only
-source subset, import services directly and provide your own FastAPI entry point;
-simply deleting that directory will break the existing gateway. No presentation
-integration is required for option A.
+**MEDIS integration note (Nov 2026):** the legacy gateway's web UI and SQLite login
+(`medis/web/`, `medis/auth/`) were removed from this repository. The helpers the AI service
+uses (`analyze_uploads`, `LegacyRiskInputs`, `json_safe`, `MAX_FILE_BYTES`) now live in
+[medis/ecg_upload.py](./medis/ecg_upload.py). `medis/database/` is kept because the history
+PDF and the longitudinal engine import its models.
 
 ## 6. Longitudinal output contract
 
@@ -290,7 +288,7 @@ not calibrated outcome models. Annual BP screening uses held-out calendar years.
 
 PCE requires confirmed model sex/cohort, age, total cholesterol, HDL, systolic BP,
 BP treatment, diabetes, current smoking, known ASCVD and snapshot date. See
-[LegacyRiskInputs](./medis/web/routes.py) and [PCE implementation](./medis/ai/ascvd.py).
+[LegacyRiskInputs](./medis/ecg_upload.py) and [PCE implementation](./medis/ai/ascvd.py).
 Do not infer these flags from missing records or combine unrelated measurement dates.
 PCE, ECG classification and CAD tabular classification have different outcomes and
 must not be presented as interchangeable probabilities. PREVENT remains pending.

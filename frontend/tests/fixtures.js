@@ -196,3 +196,42 @@ export async function mockApp(page, role = 'doctor', options = {}) {
   });
   return state;
 }
+
+// Migration v14: patient_health_summaries + publish/withdraw RPCs, and finding_reviews (v13)
+// because a significant finding must be reviewed before publishing.
+export const published = {
+  id: 'summary-1', patient_id: PATIENT, status_message: 'keep_an_eye', headline: 'Synthetic headline from the doctor.',
+  points: ['Synthetic point one'], next_step: 'Synthetic next step.', published_at: '2026-11-20T10:00:00Z', withdrawn_at: null,
+  doctor: { full_name: 'Test Doctor' },
+  shown_metrics: { systolic_bp: { label: 'Blood pressure (top number)', unit: 'mmHg', count: 2, points: [{ date: '2026-01-10', value: 120 }, { date: '2026-03-10', value: 140 }] } },
+};
+
+export async function mockPublication(page, state, { legacy = false, summaries = [] } = {}) {
+  state.summaries = summaries;
+  state.reviews = [];
+  state.rpcs = [];
+  const json = (route, data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
+  await page.route('**/rest/v1/patient_health_summaries**', (route) =>
+    legacy ? json(route, { code: 'PGRST205', message: "Could not find the table 'public.patient_health_summaries'" }, 404)
+      : json(route, state.summaries.filter((s) => !s.withdrawn_at)));
+  await page.route('**/rest/v1/finding_reviews**', (route) => json(route, state.reviews));
+  await page.route('**/rest/v1/rpc/record_finding_review', (route) => {
+    const body = route.request().postDataJSON();
+    state.reviews = [{ id: 'review-1', assessment_id: body.p_assessment_id, outcome: body.p_outcome, reviewed_by: DOCTOR, reviewed_at: new Date().toISOString(), reviewer: { full_name: 'Test Doctor' } }];
+    return json(route, state.reviews[0]);
+  });
+  for (const name of ['publish_health_summary', 'withdraw_health_summary']) {
+    await page.route(`**/rest/v1/rpc/${name}`, (route) => {
+      const body = route.request().postDataJSON();
+      state.rpcs.push({ name, body });
+      if (name === 'publish_health_summary') state.summaries = [{ ...published, id: 'summary-2', published_at: new Date().toISOString() }];
+      else state.summaries = state.summaries.map((s) => ({ ...s, withdrawn_at: new Date().toISOString() }));
+      return json(route, state.summaries[0]);
+    });
+  }
+  await page.route('**/ai/summary/**', (route) => json(route, {
+    assessment_id: 'assessment-1', summary_model: 'test-model', summary_created_at: new Date().toISOString(), fallback_reason: null,
+    ai_summary: { format: 'gemini-summary-v1', overview: 'Synthetic overview.', changes: [], review_points: [], data_gaps: [], unverified_numbers: [] },
+    patient_draft: { headline: 'Your blood pressure was 777 at your last visit.', points: ['Synthetic draft point'], next_step: 'Synthetic draft step.', unverified_numbers: ['777'], publishable: false },
+  }));
+}

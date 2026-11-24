@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pencil, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabaseClient';
+import { runMonitoring } from '../lib/monitoring';
 import { Button, Input, SimpleSelect, Textarea } from './ui';
 import { EmptyState } from './medis';
 import { PrescriptionCard } from './ai/PrescriptionPdfButton';
@@ -127,6 +128,8 @@ export default function PrescriptionForm({
       });
 
       toast.success(editingId ? 'Prescription updated' : 'Prescription issued');
+      // Only a new prescription starts a treatment course to follow up; draft edits don't.
+      if (!editingId) runMonitoring(patientId, 'prescription_issued');
       await onSaved?.();
       resetForm();
     } catch (saveFailure) {

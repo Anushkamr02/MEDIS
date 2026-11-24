@@ -8,8 +8,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useAccessRequests, useAssignedPatients, useLatestPriorities } from '../../hooks/useDoctorData';
 import { formatDate, formatDateTime, calcAge, humanize } from '../../lib/format';
 import { priorityInfo } from '../../lib/aiPriority';
+import { TREND_FILTERS, trendInfo } from '../../lib/healthTrend';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Label, Textarea } from '../../components/ui';
-import { AccessStatusPill, EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner } from '../../components/medis';
+import { AccessStatusPill, EmptyState, ErrorState, IDChip, PriorityPill, Section, SegmentedTabs, Spinner, TrendPill } from '../../components/medis';
 
 // ?priority= values (links from the Overview cards)
 const PRIORITY_FILTERS = {
@@ -53,7 +54,7 @@ export default function MyPatients() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { patients, loading, error, refresh } = useAssignedPatients(user?.id);
-  const { latest } = useLatestPriorities(patients.map((p) => p.patient_id));
+  const { latest, monitoring } = useLatestPriorities(patients.map((p) => p.patient_id));
   const { requests, refresh: refreshRequests } = useAccessRequests(user?.id);
   const initial = searchParams.get('q') ?? '';
   const [filter, setFilter] = useState(initial);
@@ -179,6 +180,19 @@ export default function MyPatients() {
   }
 
   const priorityFilter = PRIORITY_FILTERS[searchParams.get('priority')] ? searchParams.get('priority') : 'all';
+  const trendFilter = monitoring && TREND_FILTERS[searchParams.get('trend')] ? searchParams.get('trend') : 'all';
+  const setParam = (name, value) => setSearchParams((params) => {
+    const next = new URLSearchParams(params);
+    if (value === 'all') next.delete(name);
+    else next.set(name, value);
+    return next;
+  });
+  // Critical first, then worsening, then the rest by priority.
+  const rank = (p) => {
+    const a = latest[p.patient_id];
+    const priority = priorityInfo(a?.review_priority).rank;
+    return (priority === 0 ? 0 : a?.health_trend === 'WORSENING' ? 1 : 2) * 10 + priority;
+  };
   const term = filter.trim().toLowerCase();
   const visible = patients
     .filter((p) => {
@@ -187,8 +201,9 @@ export default function MyPatients() {
       return !term || name.includes(term) || id.includes(term);
     })
     .filter((p) => PRIORITY_FILTERS[priorityFilter].matches(latest[p.patient_id]?.review_priority))
-    // Stable sort: keeps newest access first within each priority
-    .sort((a, b) => priorityInfo(latest[a.patient_id]?.review_priority).rank - priorityInfo(latest[b.patient_id]?.review_priority).rank);
+    .filter((p) => TREND_FILTERS[trendFilter].matches(latest[p.patient_id]?.health_trend))
+    // Stable sort: keeps newest access first within each group
+    .sort((a, b) => rank(a) - rank(b));
 
   const open = (p) => navigate(`/doctor/patients/${p.patient_id}`);
 
@@ -290,13 +305,16 @@ export default function MyPatients() {
           label="AI check filter"
           options={Object.entries(PRIORITY_FILTERS).map(([v, f]) => [v, f.label])}
           value={priorityFilter}
-          onChange={(v) => setSearchParams((params) => {
-            const next = new URLSearchParams(params);
-            if (v === 'all') next.delete('priority');
-            else next.set('priority', v);
-            return next;
-          })}
+          onChange={(v) => setParam('priority', v)}
         />
+        {monitoring && (
+          <SegmentedTabs
+            label="Trend filter"
+            options={Object.entries(TREND_FILTERS).map(([v, f]) => [v, f.label])}
+            value={trendFilter}
+            onChange={(v) => setParam('trend', v)}
+          />
+        )}
       </div>
       {error && <ErrorState text={error} />}
       <Section title={`${visible.length} patient${visible.length === 1 ? '' : 's'}`}>
@@ -309,7 +327,7 @@ export default function MyPatients() {
                 ? 'No patients yet. Search a Patient ID to request access to a record.'
                 : term
                   ? 'No patients match this search.'
-                  : priorityFilter !== 'all'
+                  : priorityFilter !== 'all' || trendFilter !== 'all'
                   ? 'No patients in this group. Run the AI analysis from a patient\'s profile to check them.'
                   : 'No patients match this filter.'
             }
@@ -324,6 +342,7 @@ export default function MyPatients() {
                   <th className="pb-2">Age / sex</th>
                   <th className="pb-2">Access since</th>
                   <th className="pb-2">AI check</th>
+                  {monitoring && <th className="pb-2">Trend</th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -363,6 +382,17 @@ export default function MyPatients() {
                           <span className="text-xs text-muted-foreground">Not checked</span>
                         )}
                       </td>
+                      {monitoring && (
+                        <td title={assessment?.reasons?.join('\n') || undefined}>
+                          {assessment?.health_trend ? (
+                            <span aria-label={`Trend: ${trendInfo(assessment.health_trend).label}`}>
+                              <TrendPill value={assessment.health_trend} />
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -371,8 +401,10 @@ export default function MyPatients() {
           </div>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          "AI check" is the latest screening of each patient's trends across visits. It is not a diagnosis, and it only changes when someone runs
-          the analysis again.
+          "AI check" is the latest screening of each patient's trends across visits. It is not a diagnosis.
+          {monitoring
+            ? ' It is re-checked when a visit is finalized or a prescription is issued. "Trend" shows whether recorded values moved toward or away from target since the previous check.'
+            : ' It only changes when someone runs the analysis again.'}
         </p>
       </Section>
 

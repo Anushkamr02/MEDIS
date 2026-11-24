@@ -16,8 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatDate, formatDateTime, calcAge, humanize } from '../lib/format';
 import { categoryLabel } from '../components/DocumentUpload';
 import PatientAppointments from '../components/PatientAppointments';
-import HeartHealthCheck from '../components/HeartHealthCheck';
-import EcgResult from '../components/ai/EcgResult';
+import HealthSummary from '../components/HealthSummary';
 import PrescriptionPdfButton from '../components/ai/PrescriptionPdfButton';
 import {
   EmptyState,
@@ -83,7 +82,6 @@ export default function PatientDashboard() {
     documents,
     visits,
     accessHistory,
-    ecgAnalyses,
     loading,
     error,
     refresh,
@@ -127,25 +125,17 @@ export default function PatientDashboard() {
         title: a.status === 'scheduled' ? 'Appointment scheduled' : `Appointment ${humanize(a.status).toLowerCase()}`,
         detail: [a.profiles?.full_name && `Dr. ${a.profiles.full_name}`, a.reason].filter(Boolean).join(' · '),
       })),
-      ...ecgAnalyses.map((e) => ({
-        key: `ecg-${e.id}`,
-        at: e.created_at,
-        icon: HeartPulse,
-        title: 'ECG analysed',
-        detail: [e.file_name, e.classification && humanize(e.classification)].filter(Boolean).join(' · '),
-      })),
     ];
     return events
       .filter((e) => e.at && !Number.isNaN(new Date(e.at).getTime()))
       .sort((a, b) => new Date(b.at) - new Date(a.at))
       .slice(0, 30);
-  }, [visits, prescriptions, documents, appointments, ecgAnalyses]);
+  }, [visits, prescriptions, documents, appointments]);
 
   if (loading) return <Spinner text="Loading your dashboard..." />;
 
   const firstName = (profile?.full_name || 'there').split(' ')[0];
   const lastVisit = visits.find((v) => v.status !== 'pending');
-  const latestEcg = ecgAnalyses[0];
   const age = calcAge(profile?.date_of_birth);
   const pendingAccess = accessHistory.filter((r) => r.access_status === 'pending').length;
 
@@ -252,22 +242,6 @@ export default function PatientDashboard() {
       <div className="grid min-w-0 gap-5 lg:grid-cols-2">
         <ScrollPanel title="Health overview" icon={<HeartPulse className="h-4 w-4 text-primary" />} maxHeight="30rem">
           <div className="space-y-3">
-            <div className="rounded-lg border p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent ECG analysis</p>
-              {latestEcg ? (
-                <div className="mt-2">
-                  <EcgResult
-                    status={latestEcg.status}
-                    classification={latestEcg.classification}
-                    result={latestEcg.result}
-                    fileName={latestEcg.file_name}
-                    createdAt={latestEcg.created_at}
-                  />
-                </div>
-              ) : (
-                <p className="mt-1 text-sm text-muted-foreground">No ECG has been analysed for you yet.</p>
-              )}
-            </div>
 
             <div className="rounded-lg border p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest medical records</p>
@@ -388,25 +362,9 @@ export default function PatientDashboard() {
       {/* ---------- ECG reports and shared screening ---------- */}
       <Section id="ecg" title="ECG and heart health" icon={<HeartPulse className="h-4 w-4 text-primary" />}>
         <div className="space-y-3">
-          <HeartHealthCheck patientId={user?.id} />
-          {ecgAnalyses.length === 0 ? (
-            <EmptyState text="No ECG reports analysed yet. Your doctor runs the analysis during a consultation." />
-          ) : (
-            <div className="space-y-2">
-              {ecgAnalyses.map((e) => (
-                <EcgResult
-                  key={e.id}
-                  status={e.status}
-                  classification={e.classification}
-                  result={e.result}
-                  fileName={e.file_name}
-                  createdAt={e.created_at}
-                />
-              ))}
-            </div>
-          )}
+          <HealthSummary patientId={user?.id} />
           <p className="text-xs text-muted-foreground">
-            ECG reports you upload are stored with your{' '}
+            Your doctor reviews ECG results with you and shares what matters in a health summary. ECG reports you upload are stored with your{' '}
             <Link to="/patient/documents" className="font-medium underline">
               medical documents
             </Link>
