@@ -237,12 +237,12 @@ Answer the question directly using the relevant available records. If asked for 
 
 If information is absent, say "That information is not available in the records I can see." Missing records do not mean a normal result, no illness, no medicines, or no appointments. Respect retrieval_scope: recent records may not be the patient's complete history. Do not claim that an empty recent list proves there are no older records.
 
-Uploaded documents contain metadata only. You may identify a file and its review status, but cannot read or summarize its contents. Use lab values from shared_visits or heart_health_check when available, and distinguish those from an uploaded file. Do not treat a filename as a clinical finding. Do not infer measurement units that are absent from the data.
+Uploaded documents contain metadata only. You may identify a file and its review status, but cannot read or summarize its contents. Use lab values from shared_visits or health_summary.shown_measurements when available, and distinguish those from an uploaded file. Do not treat a filename as a clinical finding. Do not infer measurement units that are absent from the data.
 
 You can:
 - Explain the patient's shared visit results, diagnoses written by their doctor, prescriptions, medicines and lab values in simple language.
 - Explain general health terms (for example what LDL or HbA1c means and why doctors track it).
-- Explain the "heart_health_check" their doctor shared (if present): how their numbers changed between the dates given, and the doctor's note. Its review_priority is a screening flag that tells the doctor whether to look more closely, not a diagnosis or a chance of disease: NO_FLAGGED_PROGRESSION means no worrying trend was flagged, REVIEW means some results are changing in a way the doctor wants to follow, URGENT_REVIEW means the doctor wants to discuss results soon, INSUFFICIENT_DATA means there are not enough visits yet. A ten_year_risk is a population estimate of heart attack or stroke within 10 years, not a prediction for them personally.
+- Explain the "health_summary" their doctor wrote and published for them (if present): its status message, the doctor's points and next step, and how the measurements it shows changed between the dates given. It is the doctor's own summary, so quote it rather than reinterpreting it. The screening the doctor used, any risk percentage, flag or ECG result is not available to you: if the patient asks about one, say it is not in the records you can see and that their doctor can go through it with them.
 - Help them use MEDIS: share their Patient ID with any doctor so the doctor can open their record; upload reports under "Medical documents" on the dashboard (choose the type, hospital and date, then the file); see every visit under "Visit history"; see which doctors opened their record under "Doctors who accessed your record"; notifications are under the bell icon; each prescription has "Download PDF"; "My profile" shows and edits their details; appointments are booked by their doctor.
 
 You must not:
@@ -274,25 +274,36 @@ def chat_context(record):
     context = deepcopy(record)
     catalog = {}
 
-    def cite(row, label):
+    def cite(row, label, anchor=None):
+        """Attaches an evidence id, and where the patient's dashboard shows it.
+
+        `anchor` is the DOM id of that item on the patient's pages
+        (VisitTimeline, PrescriptionsPanel, HealthSummary), so a source chip
+        in the chat can scroll to the record it cites.
+        """
         if not row:
             return
         source_id = f"S{len(catalog) + 1}"
         row["source_id"] = source_id
-        catalog[source_id] = label
+        catalog[source_id] = {"label": label, "anchor": anchor}
 
-    cite(context.get("patient"), "Patient profile")
+    cite(context.get("patient"), "Patient profile", "profile-card")
     for row in context.get("current_medications", []):
-        cite(row, f"Current medicine: {row.get('medicine_name') or 'recorded medicine'}")
+        cite(row, f"Current medicine: {row.get('medicine_name') or 'recorded medicine'}", "medications")
     for row in context.get("shared_visits", []):
-        cite(row, f"Visit {row.get('visit_id') or row.get('consultation_date') or 'shared visit'}")
+        visit_id = row.get("visit_id")
+        cite(row, f"Visit {visit_id or row.get('consultation_date') or 'shared visit'}",
+             f"visit-{visit_id}" if visit_id else "visit-history")
     for index, row in enumerate(context.get("prescriptions", []), 1):
-        cite(row, f"Prescription {row.get('date') or 'date unavailable'} (record {index})")
+        # The row id is only an anchor for the patient's own prescription list.
+        prescription_id = row.pop("id", None)
+        cite(row, f"Prescription {row.get('date') or 'date unavailable'} (record {index})",
+             f"rx-{prescription_id}" if prescription_id else "prescriptions")
     for row in context.get("upcoming_appointments", []):
-        cite(row, f"Appointment {row.get('when') or 'date unavailable'}")
+        cite(row, f"Appointment {row.get('when') or 'date unavailable'}", "appointments")
     for row in context.get("uploaded_documents", []):
-        cite(row, f"Document metadata: {row.get('file_name') or 'uploaded file'}")
-    cite(context.get("heart_health_check"), "Shared heart health check")
+        cite(row, f"Document metadata: {row.get('file_name') or 'uploaded file'}", "documents")
+    cite(context.get("health_summary"), "Health summary from your doctor", "health-summary")
     context["source_catalog"] = catalog
     schema = deepcopy(CHAT_SCHEMA)
     if catalog:
@@ -317,8 +328,10 @@ def validate_chat_answer(answer, catalog):
             raise ValueError("Invalid reply or evidence reference")
     except (ValidationError, ValueError):
         raise HTTPException(502, "The AI returned an invalid answer or source reference. Please try again.")
+    cited = [catalog[source] for source in checked.sources]
     return {"reply": checked.reply.strip(),
-            "sources": list(dict.fromkeys(catalog[source] for source in checked.sources)),
+            # {label, anchor} per chip, deduplicated, in the order cited
+            "sources": list({entry["label"]: entry for entry in cited}.values()),
             "suggest_contact_doctor": checked.suggest_contact_doctor}
 
 EMERGENCY = re.compile(

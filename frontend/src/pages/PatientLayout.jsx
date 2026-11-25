@@ -9,6 +9,7 @@ import { Button } from '../components/ui';
 import { IDChip, Logo } from '../components/medis';
 import NotificationBell from '../components/NotificationBell';
 import PatientChat from '../components/PatientChat';
+import { useRevealHash } from '../lib/chatSources';
 
 /** The five sections of the patient dashboard, in order. */
 export const PATIENT_NAV = [
@@ -38,6 +39,9 @@ export default function PatientLayout() {
   const { notifications, markRead, markAllRead } = useNotifications(user?.id);
   const patientData = usePatientData(user?.id);
   const closeButton = useRef(null);
+
+  // A source chip in Ask MEDIS navigates here with #anchor; reveal that record.
+  useRevealHash();
 
   // Close the mobile section menu after a navigation.
   useEffect(() => {

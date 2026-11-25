@@ -267,11 +267,19 @@ things.
 - The patient's messages appear on the right, the assistant's on the left.
 - Show a time on each message.
 - Assistant messages can contain simple formatting: bold text and bullet lists.
-- They can also contain **source chips**, e.g. `Visit MEDIS-V-000789 · 08 Oct 2026` or
-  `Prescription · 08 Oct`. Tapping a chip scrolls the dashboard to that item.
+- They can also contain **source chips**, e.g. `Visit MEDIS-V-000789` or
+  `Prescription 08 Oct 2026 (record 1)`. **Built:** a chip is a button. It closes the drawer,
+  goes to the page that lists that record (`/patient/visits`, `/patient/prescriptions`, or the
+  dashboard) and scrolls to it with a short highlight (`lib/chatSources.js`).
 - **Footer line under every assistant reply:** *"For information only, not medical advice. Ask
   your doctor about any decision."*
-- **Feedback on each reply:** 👍 / 👎 icons (optional).
+- **Feedback on each reply:** 👍 / 👎 icons. **Built:** they save through `rate_chat_message()`
+  (migration v16); pressing the same choice again clears it. They are hidden on a database
+  without v16.
+- **What the assistant may read:** the patient's own profile, shared visits, medicines,
+  prescriptions, appointments and document names, plus the **health summary a doctor published**
+  (v14). It never reads `cad_assessments`, so no review priority, risk percentage, flag or ECG
+  result can reach the patient through chat.
 
 **Input bar:**
 - multi-line text box with placeholder "Type your question…",
@@ -415,7 +423,7 @@ If the profile is empty, show a **Complete your profile** button.
   3. **Trend graphs.**
   4. **Flags and evidence list.**
   5. **Data quality notes.**
-  6. **10-year risk (PCE)** card.
+  6. **10-year risk** card (2023 PREVENT, plus the legacy 2013 PCE for comparison).
   7. **Latest ECG analysis** card.
 - **Panel buttons:**
   - **Run analysis** (first time) or **Refresh analysis**
@@ -536,7 +544,8 @@ medications.
 - A compact version of the AI Insights panel (§3.10) for this patient.
 - It **includes the values of the visit being written**, so the doctor can see how today's
   numbers change the trend.
-- **Buttons:** **Run AI screening** and **Calculate 10-year risk (PCE)**.
+- **Buttons:** **Run AI screening**. The 10-year risk card is on the Patient Profile only,
+  because it needs a saved assessment to attach its confirmed inputs to.
 
 **Test reports for this visit:**
 - An upload form and list (same as the documents section).
@@ -667,8 +676,9 @@ States:
 - **Reference band** (light shaded area) showing the normal or target range, e.g.
   LDL < 100, SBP < 130, HbA1c < 5.7. The engineering team will supply the exact values.
 - **Point tooltip:** value and unit, date, hospital, Visit ID, doctor.
-- **Point marker** by hospital (shape or outline) is optional, so a doctor can see the data came
-  from different hospitals.
+- **Point marker by hospital** [BUILT]: each hospital gets its own shape (circle, square,
+  diamond, triangle, cross) and a key under the chart naming them, so a doctor can see that a
+  series mixes sources. The colour still belongs to the metric.
 - **Header line above each chart**, from the engine:
   - change (e.g. **+60 mg/dL / +63%**),
   - direction arrow (↑ worsening, ↓ improving, → stable; the colour depends on the metric:
@@ -694,28 +704,45 @@ States:
 - e.g. "2 readings excluded (conflicting same-day values)" or "HbA1c not recorded at Fortis
   visit".
 
-**(6) 10-year risk (PCE) card**
-- **Title:** "10-year ASCVD risk (Pooled Cohort Equations, 2013)".
-- **Button:** **Calculate**. It opens a **confirmation form**, because the doctor must confirm
-  each input. The system **never guesses** them.
+**(6) 10-year risk card** [BUILT: `ai/RiskCard.jsx` + `ai/RiskForm.jsx`]
+- **Title:** "10-year risk (doctor only)", with a line saying it does not use the screening
+  above and is never shown to the patient.
+- **Two equations:**
+  - **PREVENT (2023, base model)** — the default. No race or cohort term.
+  - **Legacy 2013 Pooled Cohort Equations** — kept for explicit comparison, behind
+    **Compare 2013 PCE**.
+- **Buttons:** **Calculate PREVENT** / **Compare 2013 PCE** (then **Recalculate …**). Each opens
+  a **confirmation form**, because the doctor must confirm every input. The system **never
+  guesses** them.
   - Sex (Male / Female)
-  - Race/cohort (as required by the equation)
-  - Age (pre-filled)
+  - Age (pre-filled; 30–79 for PREVENT, 40–79 for the PCE)
   - Total cholesterol, HDL, Systolic BP (pre-filled from the latest visit, editable, with
-    "measured on <date>" shown)
+    "latest reading, <date>" shown)
+  - **PREVENT also:** eGFR, and BMI (needed only for the heart-failure outcome)
+  - **PCE also:** race/cohort, as the equation requires
   - On BP treatment? (Yes / No)
+  - **PREVENT also:** On a statin or other lipid-lowering medicine? (Yes / No)
   - Diabetes? (Yes / No)
   - Current smoker? (Yes / No)
   - Known heart disease or stroke (ASCVD)? (Yes / No)
-  - Snapshot date
+  - Snapshot date (must be within the last 365 days)
   - Every Yes/No starts **unselected**. **Calculate** stays disabled until every input is
-    answered.
+    answered; BMI may be left blank, and the heart-failure line then says so instead of
+    guessing it.
 - **Result:**
-  - a big **% number** and a category label,
-  - "Inputs confirmed by Dr. X on <date>",
-  - a limitations note *"Legacy 2013 equation; not calibrated for Indian populations."*
-- **Blocked state:** if the patient already has known ASCVD, show *"Not applicable: patient
-  has known ASCVD."*, not a number.
+  - PREVENT: one **%** per outcome — total CVD, heart attack or stroke (ASCVD), heart failure —
+    plus the ASCVD risk band (Low / Borderline / Intermediate / High),
+  - PCE: one **%** and its band,
+  - "Inputs confirmed by Dr. X on <date> · values measured <date>",
+  - a collapsible **Limitations** list, which always includes *"not calibrated for Indian
+    populations"*.
+- **Blocked state:** known cardiovascular disease, an unsupported sex/cohort, a value outside
+  the equation's range, a stale or future snapshot, or a missing input shows the engine's own
+  sentence (for example *"Not applicable: the patient has known cardiovascular disease …"*),
+  **never a number**. Values are never silently clamped.
+- **Storage:** the result and the confirmed inputs are saved on the assessment
+  (`cad_assessments.pce`, PREVENT under `pce.prevent`) by `POST /ai/risk/{assessment_id}`. It is
+  never written into the trend report or the review priority.
 
 **(7) Latest ECG analysis card**
 - **Shows:**

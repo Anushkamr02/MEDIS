@@ -245,6 +245,21 @@
 
 /* Section switches in the patient dashboard: a short settle, no motion
    for anyone who asked for less. */
+/* An Ask MEDIS source chip jumped to this record (lib/chatSources.js). */
+.source-highlight {
+  animation: source-highlight 2.2s ease-out;
+  border-radius: var(--radius);
+}
+
+@keyframes source-highlight {
+  0%, 60% {
+    box-shadow: 0 0 0 2px var(--primary), 0 0 0 6px color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, 0 0 0 6px transparent;
+  }
+}
+
 @keyframes content-enter {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }

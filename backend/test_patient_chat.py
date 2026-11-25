@@ -38,7 +38,8 @@ class EvidenceTests(unittest.TestCase):
         context, catalog, schema = llm.chat_context(record)
         self.assertEqual(record, original)
         self.assertEqual(context["shared_visits"][0]["ldl_cholesterol"], 123)
-        self.assertEqual(catalog[context["shared_visits"][0]["source_id"]], "Visit TEST-V1")
+        self.assertEqual(catalog[context["shared_visits"][0]["source_id"]],
+                         {"label": "Visit TEST-V1", "anchor": "visit-TEST-V1"})
         self.assertEqual(schema["properties"]["sources"]["items"]["enum"], list(catalog))
         self.assertNotIn("enum", llm.CHAT_SCHEMA["properties"]["sources"]["items"])
 
@@ -49,15 +50,29 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(llm.validate_chat_answer(generated(), catalog)["sources"], [])
 
     def test_citations_resolve_and_deduplicate(self):
-        answer = llm.validate_chat_answer(generated(["S1", "S1"]), {"S1": "Visit TEST-V1"})
-        self.assertEqual(answer["sources"], ["Visit TEST-V1"])
+        catalog = {"S1": {"label": "Visit TEST-V1", "anchor": "visit-TEST-V1"}}
+        answer = llm.validate_chat_answer(generated(["S1", "S1"]), catalog)
+        self.assertEqual(answer["sources"], [{"label": "Visit TEST-V1", "anchor": "visit-TEST-V1"}])
+
+    def test_sources_carry_the_anchor_of_the_record_they_cite(self):
+        record = {"shared_visits": [{"visit_id": "TEST-V1"}],
+                  "prescriptions": [{"date": "2026-10-01", "id": "rx-uuid"}],
+                  "health_summary": {"headline": "Steady"}}
+        context, catalog, _ = llm.chat_context(record)
+        anchors = {entry["label"]: entry["anchor"] for entry in catalog.values()}
+        self.assertEqual(anchors["Visit TEST-V1"], "visit-TEST-V1")
+        self.assertEqual(anchors["Prescription 2026-10-01 (record 1)"], "rx-rx-uuid")
+        self.assertEqual(anchors["Health summary from your doctor"], "health-summary")
+        # The row id is an anchor only; it is not sent to the model.
+        self.assertNotIn("id", context["prescriptions"][0])
 
     def test_unknown_citations_and_malformed_responses_are_rejected(self):
+        catalog = {"S1": {"label": "Visit TEST-V1", "anchor": "visit-TEST-V1"}}
         for answer in (generated(["invented"]), {"reply": "answer"},
                        {**generated(), "reply": "   "},
                        {**generated(), "suggest_contact_doctor": "false"}):
             with self.subTest(answer=answer), self.assertRaises(HTTPException) as raised:
-                llm.validate_chat_answer(answer, {"S1": "Visit TEST-V1"})
+                llm.validate_chat_answer(answer, catalog)
             self.assertEqual(raised.exception.status_code, 502)
 
 
@@ -70,6 +85,10 @@ class ChatFlowTests(unittest.IsolatedAsyncioTestCase):
                     "consultations": [{"visit_id": "TEST-V1", "consultation_date": "2026-10-01",
                                        "ldl_cholesterol": 123}],
                     "medical_reports": [{"file_name": "test.pdf", "review_status": "pending_review"}],
+                    "patient_health_summaries": [{"headline": "Your results look steady",
+                                                  "status_message": "steady",
+                                                  "published_at": "2026-10-02T09:00:00+00:00",
+                                                  "profiles": {"full_name": "Dr Synthetic"}}],
                 })
 
                 async def model(system, messages, schema, **kwargs):
@@ -79,22 +98,28 @@ class ChatFlowTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(messages[-1], {"role": "user", "content": question})
                     self.assertIn("metadata only", record["retrieval_scope"]["uploaded_documents"])
                     self.assertEqual(record["uploaded_documents"][0]["file_name"], "test.pdf")
+                    # The published summary is the only assessment-derived
+                    # thing the patient's assistant may see (v14).
+                    self.assertEqual(record["health_summary"]["published_by"], "Dr Synthetic")
+                    self.assertNotIn("review_priority", json.dumps(record))
                     self.assertEqual(db.writes, [])
                     return generated([visit["source_id"]]), "mock"
 
                 with patch.object(llm, "generate_json", side_effect=model):
                     result = await server.ai_chat(server.ChatRequest(message=question),
                                                   (db, {"id": "TEST-P1", "role": "patient"}))
-                self.assertEqual(result["reply"]["sources"], ["Visit TEST-V1"])
+                self.assertEqual(result["reply"]["sources"],
+                                 [{"label": "Visit TEST-V1", "anchor": "visit-TEST-V1"}])
                 self.assertEqual(len(db.writes), 2)
+                self.assertNotIn("cad_assessments", [table for table, _ in db.queries])
                 for table, params in db.queries:
                     self.assertEqual(params.get("patient_id", params.get("id")), "eq.TEST-P1")
                     if table == "consultations":
                         self.assertEqual(params["is_shared_with_patient"], "eq.true")
                     if table == "medical_reports":
                         self.assertEqual(params["order"], "uploaded_at.desc")
-                    if table == "cad_assessments":
-                        self.assertEqual(params["shared_with_patient"], "eq.true")
+                    if table == "patient_health_summaries":
+                        self.assertEqual(params["withdrawn_at"], "is.null")
 
     async def test_empty_record_can_be_explained_without_inventing_evidence(self):
         db = FakeSupa()

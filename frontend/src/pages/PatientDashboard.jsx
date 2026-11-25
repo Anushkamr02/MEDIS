@@ -169,7 +169,7 @@ export default function PatientDashboard() {
       </div>
 
       {/* ---------- Patient information ---------- */}
-      <section className="rounded-xl border bg-card p-4 shadow-card sm:p-5">
+      <section id="profile-card" className="scroll-mt-24 rounded-xl border bg-card p-4 shadow-card sm:p-5">
         <div className="flex flex-wrap items-start gap-4">
           <span
             aria-hidden
@@ -377,7 +377,7 @@ export default function PatientDashboard() {
       <PatientAppointments patientId={user?.id} />
 
       {/* ---------- Current medications ---------- */}
-      <Section title="Current medications" icon={<Pill className="h-4 w-4 text-primary" />}>
+      <Section id="medications" title="Current medications" icon={<Pill className="h-4 w-4 text-primary" />}>
         {medications.length === 0 ? (
           <EmptyState text="No ongoing medications logged." />
         ) : (

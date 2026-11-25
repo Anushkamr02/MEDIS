@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, MessageCircle, MoreHorizontal, Send, X } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, MessageCircle, MoreHorizontal, Send, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { aiRequest } from '../lib/aiClient';
+import { isMissingColumn, isMissingRpc } from '../lib/dashboardCompatibility';
+import { pageForAnchor, revealAnchor } from '../lib/chatSources';
 import { cn } from '../lib/utils';
 import {
   Button,
@@ -26,6 +29,13 @@ const SUGGESTIONS = [
   'How do I share my ID with a doctor?',
 ];
 const MAX_LENGTH = 1000;
+// Columns added by migration v16; without them the feedback buttons stay hidden.
+const WITH_FEEDBACK = '*, feedback';
+
+/** Old rows stored a plain label; v16 onwards a chip knows where it points. */
+function sourceParts(source) {
+  return typeof source === 'string' ? { label: source, anchor: null } : source ?? {};
+}
 
 function timeOf(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -61,6 +71,8 @@ function Rich({ text }) {
  */
 export default function PatientChat({ open, onOpenChange }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [messages, setMessages] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState('');
@@ -68,21 +80,39 @@ export default function PatientChat({ open, onOpenChange }) {
   const [error, setError] = useState('');
   const [contactHint, setContactHint] = useState(false);
   const [about, setAbout] = useState(false);
+  const [canRate, setCanRate] = useState(true); // until v16 proves otherwise
   const endRef = useRef(null);
 
   useEffect(() => {
     if (!open || loaded || !user?.id) return;
-    supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('patient_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(100)
-      .then(({ data, error: loadError }) => {
-        if (loadError) setError(loadError.message);
-        setMessages(data ?? []);
+    let active = true;
+    const read = (columns) =>
+      supabase
+        .from('chat_messages')
+        .select(columns)
+        .eq('patient_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(100);
+
+    read(WITH_FEEDBACK).then(async ({ data, error: loadError }) => {
+      if (!active) return;
+      if (isMissingColumn(loadError)) {
+        // Older database: the conversation still works, ratings are hidden.
+        setCanRate(false);
+        const fallback = await read('*');
+        if (!active) return;
+        if (fallback.error) setError(fallback.error.message);
+        setMessages(fallback.data ?? []);
         setLoaded(true);
-      });
+        return;
+      }
+      if (loadError) setError(loadError.message);
+      setMessages(data ?? []);
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
   }, [open, loaded, user?.id]);
 
   useEffect(() => {
@@ -110,6 +140,29 @@ export default function PatientChat({ open, onOpenChange }) {
     }
     setMessages((prev) => [...prev.filter((m) => m.id !== 'pending'), data.question, data.reply]);
     setContactHint(data.suggest_contact_doctor);
+  }
+
+  /** 👍 / 👎 on one reply; clicking the same choice again clears it. */
+  async function rate(message, choice) {
+    const feedback = message.feedback === choice ? null : choice;
+    setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, feedback } : m)));
+    const { error: rateError } = await supabase.rpc('rate_chat_message', {
+      p_message_id: message.id,
+      p_feedback: feedback,
+    });
+    if (!rateError) return;
+    setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, feedback: message.feedback ?? null } : m)));
+    if (isMissingRpc(rateError)) setCanRate(false);
+    else setError(rateError.message);
+  }
+
+  /** Takes the patient to the record a source chip cites. */
+  function openSource(anchor) {
+    if (!anchor) return;
+    const page = pageForAnchor(anchor);
+    onOpenChange(false); // the drawer covers the page on mobile
+    if (pathname === page) revealAnchor(anchor);
+    else navigate(`${page}#${anchor}`);
   }
 
   async function clearConversation() {
@@ -202,18 +255,55 @@ export default function PatientChat({ open, onOpenChange }) {
                   <Rich text={m.content} />
                   {m.sources?.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {m.sources.map((s) => (
-                        <span key={s} className="rounded-md border bg-muted px-2 py-0.5 font-mono text-[10px]">
-                          {s}
-                        </span>
-                      ))}
+                      {m.sources.map((s) => {
+                        const { label, anchor } = sourceParts(s);
+                        return anchor ? (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => openSource(anchor)}
+                            className="rounded-md border bg-muted px-2 py-0.5 font-mono text-[10px] transition-colors hover:border-primary hover:text-primary"
+                            title={`Show ${label} on your records`}
+                          >
+                            {label}
+                          </button>
+                        ) : (
+                          <span key={label} className="rounded-md border bg-muted px-2 py-0.5 font-mono text-[10px]">
+                            {label}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                   <p className="mt-2 border-t pt-1.5 text-[10px] text-muted-foreground">
                     For information only, not medical advice. Ask your doctor about any decision.
                   </p>
                 </div>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">{timeOf(m.created_at)}</p>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <p className="text-[10px] text-muted-foreground">{timeOf(m.created_at)}</p>
+                  {canRate && m.id !== 'pending' && (
+                    <>
+                      {[
+                        ['up', ThumbsUp, 'Helpful'],
+                        ['down', ThumbsDown, 'Not helpful'],
+                      ].map(([choice, Icon, label]) => (
+                        <button
+                          key={choice}
+                          type="button"
+                          aria-label={label}
+                          aria-pressed={m.feedback === choice}
+                          onClick={() => rate(m, choice)}
+                          className={cn(
+                            'rounded p-1 transition-colors hover:bg-muted',
+                            m.feedback === choice ? 'text-primary' : 'text-muted-foreground'
+                          )}
+                        >
+                          <Icon className="h-3 w-3" />
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
               </div>
             )
           )}

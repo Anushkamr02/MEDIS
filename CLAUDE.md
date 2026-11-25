@@ -28,8 +28,8 @@ Keep that framing in code, copy and comments.
 React 19 + Vite frontend ──► Supabase (Auth, Postgres + RLS, Storage)   <- system of record
         │
         └──────────────────► FastAPI AI service (backend/server.py)
-                                 ├─ medis/ engine (trends, PCE, ECG CNN, OCR, PDFs)
-                                 └─ Google Gemini (Ask MEDIS patient chatbot)
+                                 ├─ medis/ engine (trends, monitoring, risk, ECG CNN, OCR, PDFs)
+                                 └─ Google Gemini (doctor summary + Ask MEDIS chatbot)
 ```
 
 Two rules that the whole design rests on:
@@ -66,7 +66,8 @@ backend/
   record_summary.py    Local, deterministic prior-visit summary for doctors
   llm.py               Gemini prompts, JSON schemas, number-grounding check
   history_pdf.py       Consolidated history PDF
-  medis/ai/            longitudinal_analysis, ascvd (PCE), visit_patterns, trajectories, seasonality
+  medis/ai/            longitudinal_analysis, monitoring, drug_classes, trajectories, visit_patterns,
+                       seasonality, prevent (2023 PREVENT), ascvd (legacy 2013 PCE)
   medis/ecg_*.py       ECG preprocessing, validation, inference, PDF digitizer
   medis/report_extraction.py   Tesseract OCR of lab reports
   models/ecg_cnn.keras 1D CNN (Normal vs MI)
@@ -75,7 +76,8 @@ frontend/src/
   pages/               patient pages; pages/doctor/ = doctor portal
   components/          UI kit (ui.jsx), ai/ panels, forms, chatbot
   hooks/               usePatientData, useDoctorData, useNotifications
-  lib/                 supabaseClient, aiClient, aiPriority, format, patientAccess
+  lib/                 supabaseClient, aiClient, aiPriority, healthTrend, monitoring, findingReview,
+                       escalation, healthSummary, chatSources, format, patientAccess
   styles/theme.css     Tailwind v4 entry + design tokens
   tests/               Playwright e2e specs
 supabase/              numbered SQL migrations + demo_seed.sql
@@ -96,8 +98,8 @@ pip install -r backend/requirements.txt
 cd backend && python -m uvicorn server:app --port 8000
 # http://localhost:8000/health -> ecg_model / ocr / scanned_pdf should be true
 
-# Backend tests
-cd backend && python -m unittest test_longitudinal_engine test_visit_patterns
+# Backend tests (all of them; 100+)
+cd backend && python -m unittest
 cd backend && python setup_check.py            # verifies Tesseract/Poppler/model
 ```
 
@@ -106,7 +108,7 @@ The shell here is PowerShell; the Bash tool is also available. Use each tool's o
 ## Database / migrations
 
 Migrations are plain SQL run by hand in the Supabase SQL editor, **in order**:
-`v1, v2, v3, v3b, v3c, v3d, v3e, v3f, v4 … v15` (`v1`–`v3b` predate this repo's
+`v1, v2, v3, v3b, v3c, v3d, v3e, v3f, v4 … v16` (`v1`–`v3b` predate this repo's
 `supabase/` folder). They are written to be **safe to re-run** (`create or replace`,
 `if not exists`) — keep new ones idempotent and in a `begin; … commit;` block.
 
@@ -139,6 +141,9 @@ Migrations are plain SQL run by hand in the Supabase SQL editor, **in order**:
   step is audited with no actor (`audit_logs.user_id` is now nullable) and stops once a review exists.
   Also adds `viewed_clinical_insights` to `log_patient_access()` and the access history. Labels in
   `lib/escalation.js`. Run `supabase/governance_check.sql` afterwards (it rolls back).
+- `v16` — Ask MEDIS feedback: `chat_messages.feedback` / `feedback_at`, written only by
+  `rate_chat_message()` (the patient's own assistant replies; `chat_messages` has no UPDATE
+  policy). The 👍/👎 buttons hide when v16 isn't applied.
 
 When a change needs schema, add the next numbered file **and** say in your summary
 that the user must apply it in Supabase — nothing applies migrations automatically.
@@ -165,19 +170,31 @@ Code should degrade gracefully when an older schema is live (see
 - **Models not validated on an input are not run.** ECG photos and PDFs are digitised
   for display only; the CNN is deliberately not applied to printouts. Don't "improve"
   this by running it anyway.
-- **OCR and PCE results are doctor-verified** before they are applied. Keep the
-  confirm step in any new extraction flow.
+- **OCR results and risk estimates are doctor-confirmed.** Extracted lab values are applied
+  only after the doctor ticks each one, and `medis/ai/prevent.py` / `medis/ai/ascvd.py` run
+  only on inputs confirmed in `ai/RiskForm.jsx`. A missing input is never assumed negative: the
+  calculators return a status (`NOT_CALCULATED`, `NOT_APPLICABLE`, `OUT_OF_RANGE`), not a
+  number, and a risk result is never merged into the trend report or the review priority.
+  Keep the confirm step in any new extraction or calculator flow.
 - **Secrets:** `frontend/.env`, `backend/.env` are git-ignored. Never commit keys.
   Gemini runs on a free key, so demo data only.
 
-## Known state (as of 2026-11-10, `main` @ 2934c15)
+## Known state (as of 2026-11-25)
 
-- Patient-controlled access (v11) was added on 2026-11-10: request / approve /
-  decline / revoke, emergency access with reason. Doctor UI in `MyPatients.jsx`,
-  patient UI in `pages/patient/PatientAccess.jsx`, e2e in `tests/access-control.spec.js`.
-- Recent work: draft delete + confirm, optional medication rows, patient-data refresh
-  after profile setup, duplicate ECG card removed from Patient Overview, AI check badges
-  now open review reasons and evidence.
+- All 14 steps of [docs/IMPLEMENTATION_STEPS.md](docs/IMPLEMENTATION_STEPS.md) are
+  implemented: continuous monitoring (v12), Clinical Insights and finding review (v13),
+  Gemini summary with a patient draft, doctor-reviewed publication and patient lockdown
+  (v14), escalation of urgent findings (v15), audit and governance tests, Ask MEDIS
+  feedback and source chips (v16), the doctor top-bar ID search and hospital chart
+  markers, and the 10-year risk card (2023 PREVENT + legacy 2013 PCE).
+- **Migrations v12–v16 must be applied by hand** in the Supabase SQL editor, in order.
+  Every feature above hides itself on an older schema, so the app keeps working until
+  then.
+- Patient-controlled access (v11, 2026-11-10): request / approve / decline / revoke,
+  emergency access with a reason. Doctor UI in `MyPatients.jsx`, patient UI in
+  `pages/patient/PatientAccess.jsx`, e2e in `tests/access-control.spec.js`.
+- Risk equations are doctor-only and are not shown to patients, published summaries or
+  the chatbot. `test_prevent.py` pins PREVENT to its published worked examples.
 
 ## Further reading
 

@@ -4,6 +4,7 @@ Supabase stays the system of record (auth, RLS, storage). This service only
 runs the analysis engines on data read with the caller's own token:
 
   POST /ai/longitudinal/{patient_id}   trend screening (+ optional legacy PCE)
+  POST /ai/risk/{assessment_id}        10-year risk (2023 PREVENT, legacy 2013 PCE) from confirmed inputs
   POST /ai/monitor/{patient_id}        re-check after a visit / prescription / report (saves the trend)
   POST /ai/monitor/queue               process patients queued by the database (migration v12)
   POST /ai/ecg/document/{document_id}  ECG analysis of an uploaded PDF/image
@@ -29,13 +30,14 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.concurrency import run_in_threadpool
 
 import llm
 from record_summary import summarize_records
 from adapters import consultations_to_visits, extracted_to_rows, compact_lead_samples
 from medis.ai.ascvd import calculate_pce
+from medis.ai.prevent import calculate_prevent
 from medis.ai.longitudinal_analysis import ENGINE_VERSION, assess_timeline
 from medis.ai.monitoring import assess_monitoring
 from medis.config import MODELS
@@ -92,6 +94,7 @@ ACCESS_EVENTS = {
     "ai_report_extraction": "ran_ai_analysis",
     "ai_summary": "ran_ai_analysis",
     "ai_monitoring": "ran_ai_analysis",
+    "ai_risk_calculation": "ran_ai_analysis",
     "history_pdf_export": "generated_history_pdf",
     "prescription_pdf_export": "downloaded_document",
 }
@@ -224,6 +227,74 @@ async def longitudinal(patient_id: str, body: LongitudinalRequest, ctx=Depends(c
     await require_patient_access(supa, patient_id)
     return await run_assessment(supa, user, patient_id, consultation_id=body.consultation_id,
                                 draft_values=body.draft_values, pce_inputs=body.pce_inputs, save=body.save)
+
+
+# ---------- 10-year risk calculators (doctor-only, confirmed inputs) ----------
+
+class RiskInputs(BaseModel):
+    """One snapshot the doctor confirmed by hand, for both equations.
+
+    Deliberately permissive about ranges and completeness: the calculators in
+    medis.ai.prevent and medis.ai.ascvd are the single place that decides
+    whether a snapshot is complete, in range and applicable, so the doctor
+    reads their wording instead of a validation error. Only `model` picks which
+    equation runs.
+    """
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+    model: Literal["prevent", "pce"] = "prevent"
+    model_sex: Optional[str] = None
+    cohort: Optional[str] = None                 # 2013 PCE only
+    age: Optional[float] = None
+    total_cholesterol: Optional[float] = None
+    hdl_cholesterol: Optional[float] = None
+    systolic_bp: Optional[float] = None
+    bmi: Optional[float] = None                  # PREVENT heart failure only
+    egfr: Optional[float] = None                 # PREVENT only
+    bp_treated: Optional[StrictBool] = None
+    statin: Optional[StrictBool] = None          # PREVENT only
+    diabetes: Optional[StrictBool] = None
+    current_smoker: Optional[StrictBool] = None
+    known_ascvd: Optional[StrictBool] = None
+    snapshot_date: Optional[str] = None
+
+
+@app.post("/ai/risk/{assessment_id}")
+async def risk(assessment_id: str, body: RiskInputs, ctx=Depends(current_doctor)):
+    """10-year risk for a saved assessment, from inputs the doctor confirmed.
+
+    Nothing is inferred from the record: the inputs come from the confirmation
+    form and are stored beside the result, with who confirmed them and when.
+    A snapshot that cannot be calculated (missing input, known cardiovascular
+    disease, value out of range) is saved and returned as such, never as a
+    number. The result is kept under `pce` on the assessment and is never
+    merged into the trend report or the review priority: the screening label
+    and these population estimates answer different questions.
+    """
+    supa, user = ctx
+    rows = await supa.select("cad_assessments", {"select": "id,patient_id,pce", "id": f"eq.{assessment_id}"})
+    if not rows:
+        raise HTTPException(404, "Assessment not found")
+    assessment = rows[0]
+    await require_patient_access(supa, assessment["patient_id"])
+
+    inputs = body.model_dump(mode="json", exclude={"model"})
+    as_of = date.today()
+    calculated = (calculate_prevent(inputs, as_of=as_of) if body.model == "prevent"
+                  else calculate_pce(inputs, as_of=as_of))
+    confirmed = {"confirmed_by": user["id"], "confirmed_by_name": user["full_name"],
+                 "confirmed_at": datetime.now(timezone.utc).isoformat(), "inputs": inputs}
+    result = json_safe({**calculated, **confirmed})
+
+    stored = assessment.get("pce") or {}
+    # The legacy PCE keeps the top level it has always had; PREVENT sits beside
+    # it, so an older saved assessment still reads correctly.
+    pce = {**stored, "prevent": result} if body.model == "prevent" else {**result, "prevent": stored.get("prevent")}
+    updated = await supa.update("cad_assessments", {"id": assessment_id}, {"pce": pce})
+    if not updated:
+        raise HTTPException(403, "No access to this assessment")
+    await audit(supa, user, "ai_risk_calculation", assessment["patient_id"],
+                {"assessment_id": assessment_id, "model": calculated["model"], "status": calculated["status"]})
+    return {"assessment_id": assessment_id, "model": body.model, "result": result, "pce": pce}
 
 
 # ---------- continuous monitoring ----------
@@ -488,16 +559,6 @@ async def latest_published_summary(supa, patient_id):
     return {**row, "doctor": (row.pop("profiles", None) or {}).get("full_name")}
 
 
-async def latest_shared_assessment(supa, patient_id):
-    try:
-        rows = await supa.select("cad_assessments", {
-            "select": "id,report,pce,shared_at,patient_note", "patient_id": f"eq.{patient_id}",
-            "shared_with_patient": "eq.true", "order": "shared_at.desc", "limit": "1"})
-    except HTTPException:
-        return None  # migration v6 not applied yet: nothing is shared
-    return rows[0] if rows else None
-
-
 @app.get("/pdf/history/{patient_id}")
 async def history_pdf(patient_id: str, ctx=Depends(current_user)):
     """Doctors get every finalized visit plus a fresh screening section. A patient
@@ -653,7 +714,7 @@ async def patient_record_for_chat(supa, patient_id):
                   "serum_creatinine,egfr,hospitals(name),profiles:doctor_id(full_name)",
         "patient_id": f"eq.{patient_id}", "is_shared_with_patient": "eq.true", "order": "consultation_date.desc"})
     prescriptions = await supa.select("prescriptions", {
-        "select": "issued_at,medicines,instructions,profiles:doctor_id(full_name)",
+        "select": "id,issued_at,medicines,instructions,profiles:doctor_id(full_name)",
         "patient_id": f"eq.{patient_id}", "order": "issued_at.desc", "limit": "10"})
     appointments = await supa.select("appointments", {
         "select": "scheduled_at,reason,status,profiles:doctor_id(full_name)", "patient_id": f"eq.{patient_id}",
@@ -661,19 +722,21 @@ async def patient_record_for_chat(supa, patient_id):
     documents = await supa.select("medical_reports", {
         "select": "file_name,category,report_date,review_status", "patient_id": f"eq.{patient_id}",
         "order": "uploaded_at.desc", "limit": "20"})
-    check = await latest_shared_assessment(supa, patient_id)
-    heart_check = None
-    if check:
-        report, pce = check.get("report") or {}, check.get("pce") or {}
-        heart_check = _without_empty({
-            "shared_on": (check.get("shared_at") or "")[:10], "results_as_of": report.get("as_of"),
-            "review_priority": report.get("review_priority"), "doctor_note": check.get("patient_note"),
-            "trends": {k: {"unit": m.get("unit"), "first": m["points"][0]["value"], "first_date": m["points"][0]["date"],
-                           "latest": m["points"][-1]["value"], "latest_date": m["points"][-1]["date"],
-                           "direction": m.get("direction")}
-                       for k, m in (report.get("metric_trajectories") or {}).items() if m.get("count") and m.get("points")},
-            "ten_year_risk": ({"percent": pce.get("risk_percent"), "category": pce.get("category")}
-                              if pce.get("status") == "CALCULATED" else None),
+    published = await latest_published_summary(supa, patient_id)
+    health_summary = None
+    if published:
+        # Only what the doctor wrote and the values they chose to show
+        # (migration v14). No review priority, risk percentage, flag or ECG
+        # result reaches the chatbot: those are doctor-only (IMPROVEMENT_PLAN
+        # 3.1), and the assistant must not invent them either.
+        health_summary = _without_empty({
+            "published_on": (published.get("published_at") or "")[:10],
+            "published_by": published.get("doctor"),
+            "status_message": published.get("status_message"),
+            "headline": published.get("headline"),
+            "points": published.get("points"),
+            "next_step": published.get("next_step"),
+            "shown_measurements": published.get("shown_metrics"),
         })
 
     return {
@@ -683,7 +746,9 @@ async def patient_record_for_chat(supa, patient_id):
             "prescriptions": "Up to 10 most recently issued prescriptions; not a complete medication history.",
             "upcoming_appointments": "Up to 5 appointments from today onward; check each status before describing it as upcoming.",
             "uploaded_documents": "Up to 20 most recently uploaded files, metadata only; file contents are not retrieved.",
-            "heart_health_check": "Latest assessment shared with the patient, if available.",
+            "health_summary": "The latest summary a doctor wrote and published for this patient, if any. "
+                              "Doctor-only AI output (review priority, risk percentages, flags, ECG results) "
+                              "is never retrieved.",
         },
         "patient": _without_empty({
             "name": profile.get("full_name"), "patient_id": profile.get("display_id"),
@@ -701,7 +766,7 @@ async def patient_record_for_chat(supa, patient_id):
                                                   "status": a["status"], "doctor": (a.get("profiles") or {}).get("full_name")})
                                   for a in appointments],
         "uploaded_documents": documents,
-        "heart_health_check": heart_check,
+        "health_summary": health_summary,
     }
 
 

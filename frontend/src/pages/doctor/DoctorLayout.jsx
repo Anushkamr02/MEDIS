@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { CalendarDays, FilePen, LayoutDashboard, LogOut, Menu, UserRound, Users, X } from 'lucide-react';
+import { CalendarDays, FilePen, LayoutDashboard, LogOut, Menu, Search, UserRound, Users, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { cn } from '../../lib/utils';
-import { Button } from '../../components/ui';
+import { Button, Input } from '../../components/ui';
 import { BackButton, IDChip, Logo } from '../../components/medis';
 import NotificationBell from '../../components/NotificationBell';
 
@@ -31,6 +31,7 @@ export default function DoctorLayout() {
   const [draftCount, setDraftCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [patientId, setPatientId] = useState('');
 
   // Exposed to child pages so the profile page can reload after an edit
   const loadDoctorProfile = useCallback(async () => {
@@ -101,6 +102,17 @@ export default function DoctorLayout() {
     navigate('/login');
   }
 
+  /** Look up a patient by their permanent ID from any doctor page. */
+  function searchPatient(event) {
+    event.preventDefault();
+    const id = patientId.trim();
+    if (!id) return;
+    // My Patients owns the lookup: it filters the doctor's own patients and
+    // searches a full MEDIS-P ID, and shows the access state of each match.
+    navigate(`/doctor/patients?q=${encodeURIComponent(id)}`);
+    setPatientId('');
+  }
+
   const sidebar = (
     <nav className="flex h-full flex-col bg-sidebar p-4 text-sidebar-foreground">
       <div className="flex items-center justify-between">
@@ -160,9 +172,17 @@ export default function DoctorLayout() {
             <Menu className="h-5 w-5" />
           </Button>
           {location.pathname !== '/doctor' && <BackButton className="ml-0 mb-0" />}
-          <div className="ml-auto">
-            <NotificationBell notifications={notifications} onMarkRead={markRead} onMarkAllRead={markAllRead} />
-          </div>
+          <form className="relative ml-auto w-36 sm:w-64" role="search" onSubmit={searchPatient}>
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
+            <Input
+              value={patientId}
+              onChange={(event) => setPatientId(event.target.value)}
+              className="h-9 pl-8"
+              placeholder="Patient ID"
+              aria-label="Find a patient by MEDIS Patient ID"
+            />
+          </form>
+          <NotificationBell notifications={notifications} onMarkRead={markRead} onMarkAllRead={markAllRead} />
         </header>
         <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
           <Outlet context={{ doctorProfile, hospitalName, reloadDoctorProfile: loadDoctorProfile, refreshDraftCount }} />

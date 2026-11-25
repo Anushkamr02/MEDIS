@@ -56,7 +56,7 @@ The service also hosts the two new LLM features: the **doctor's AI patient summa
 | **Reading values out of reports (OCR)** | Not built | `report_extraction` (OCR, fields, units) | **Take theirs.** The doctor must check values before they count. |
 | Single-visit clinical alerts (spec 12.5) | Instant threshold alerts while typing | `risk_flags` (one assessment) | **Keep ours** for instant feedback while typing. Theirs is not needed. |
 | **Trends across visits** | Not built (placeholder card) | `assess_timeline`: slopes, % change, review priority, visit patterns, seasonal BP | **Take theirs.** This is the core of the CAD insight. |
-| **Absolute 10-year risk** | Not built | Legacy 2013 PCE (explicit confirmed inputs) | **Take theirs.** The doctor must confirm the inputs. |
+| **Absolute 10-year risk** | Not built | Legacy 2013 PCE (explicit confirmed inputs) | **Taken**, and the 2023 PREVENT base model was added beside it (`medis/ai/prevent.py`, step 13). The doctor confirms every input; both are doctor-only. |
 | **ECG analysis** | Doctor types free text | CNN (NORM vs MI) plus quality checks, PDF/image digitizing | **Take theirs.** Respect the blocked and failed states. |
 | Notes → structured symptoms | Doctor ticks the complaints checklist | `symptom_extraction` | **Optional later.** Our checklist is already structured. |
 | Speech transcription | Not built | **Simulated** when no transcript is given | **Drop.** Simulated dialogue must never reach a medical record. |

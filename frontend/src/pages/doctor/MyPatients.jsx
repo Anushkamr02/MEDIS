@@ -56,7 +56,7 @@ export default function MyPatients() {
   const { patients, loading, error, refresh } = useAssignedPatients(user?.id);
   const { latest, monitoring } = useLatestPriorities(patients.map((p) => p.patient_id));
   const { requests, refresh: refreshRequests } = useAccessRequests(user?.id);
-  const initial = searchParams.get('q') ?? '';
+  const initial = searchParams.get('q') ?? searchParams.get('id') ?? '';
   const [filter, setFilter] = useState(initial);
   const [results, setResults] = useState(null);
   const [access, setAccess] = useState({});

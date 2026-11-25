@@ -17,8 +17,8 @@ Every patient gets one permanent **MEDIS Patient ID** that works at every hospit
 - Upload reports (PDF or any photo, including HEIC/WebP).
 - **Control who can open the record:** approve or decline a doctor's access request, and revoke any doctor later. Emergency access is flagged with the reason the doctor gave.
 - See every doctor who opened the record (**access history**).
-- **Heart health check:** a plain-language view of the AI screening, once the doctor shares it.
-- **Ask MEDIS chatbot:** explains the patient's own shared results and medicines in simple words. It does not diagnose, and it shows an emergency notice for red-flag symptoms.
+- **Health summary from your doctor:** a plain-language summary a doctor wrote, reviewed and published. Patients never see raw AI output: no review priority, risk percentage, flag or ECG result.
+- **Ask MEDIS chatbot:** explains the patient's own shared results, medicines and published summary in simple words. It does not diagnose, and it shows an emergency notice for red-flag symptoms. Each reply can be marked 👍 / 👎, and its source chips jump to the visit or prescription they cite.
 
 ### For doctors
 - Search a patient by ID and request access; once the patient approves, see the full multi-hospital record and add medications, conditions, family history and reports. **Emergency access** opens the record at once, needs a written reason, and is shown to the patient.
@@ -28,15 +28,18 @@ Every patient gets one permanent **MEDIS Patient ID** that works at every hospit
   - Observations, diagnosis, prescriptions, then finalize and share with the patient.
 - Red-flag alerts during the consultation (e.g. chest pain at rest, BP ≥ 180/120, SpO₂ < 90%).
 - Appointments (booking, conflicts, follow-ups) and saved drafts.
-- **Overview:** counts of **Critical** and **Needs review** patients, from each patient's latest AI check.
+- **Overview:** a monitoring board — trend tiles, patients needing review, improving patients, follow-ups due, and overdue urgent findings pinned at the top.
+- **Continuous monitoring:** every finalized visit, issued prescription and verified report re-checks the patient and saves an Improving / Stable / Worsening trend with dated reasons.
+- **Clinical Insights (doctor only):** screening, monitoring, ECG and risk grouped together, with a recorded review for every significant finding, and publication of a patient-facing summary.
+- **Find any patient** by MEDIS Patient ID from the search box in the top bar, on every doctor page.
 
 ### AI decision support
 | Feature | How it works |
 |---|---|
 | Longitudinal CAD screening | A rule-based trend engine across finalized visits (BP, lipids, glucose, HbA1c, BMI, kidney function, symptoms). The result is a review priority (Critical / Needs review / No concern found / Not enough data), **not a probability**. |
-| Trend graphs | Per-metric charts with target ranges. Each point is linked to the visit and hospital it came from. |
+| Trend graphs | Per-metric charts with target ranges. Each point is linked to the visit it came from, and its shape shows which hospital recorded it. |
 | AI summary | Google Gemini writes a summary of the screening for the doctor. Numbers that cannot be traced back to the data are flagged for checking. |
-| 10-year ASCVD risk | Pooled Cohort Equations (2013), only from inputs the doctor confirms. Not calibrated for Indian populations. |
+| 10-year risk | The **2023 PREVENT** base model (total CVD, ASCVD and heart failure) with the legacy **2013 Pooled Cohort Equations** for comparison, both only from inputs the doctor confirms one by one. Neither is calibrated for Indian populations, neither is shown to patients, and neither is merged with the screening priority. `backend/test_prevent.py` pins PREVENT to its published worked examples. |
 | ECG analysis | Digital recordings (WFDB `.hea`/`.dat`/`.mat`, CSV, NPY): a 1D CNN (Normal vs MI), signal quality checks, intervals and the waveform for each lead. Photos and PDFs are digitised only: the CNN is deliberately not run on them, because it was not validated on printouts. |
 | Lab report extraction | OCR (Tesseract) reads lab values from a report; the doctor verifies each value before it is applied. |
 
@@ -48,7 +51,7 @@ Every patient gets one permanent **MEDIS Patient ID** that works at every hospit
 React + Vite frontend ──► Supabase (Auth, Postgres with row-level security, Storage)
         │
         └──────────────► FastAPI AI service (backend/server.py)
-                              ├─ medis/ engine (trend screening, PCE, ECG CNN, OCR, PDFs)
+                              ├─ medis/ engine (trends, monitoring, risk, ECG CNN, OCR, PDFs)
                               └─ Google Gemini (summary, chatbot)
 ```
 
@@ -148,8 +151,9 @@ All use the password `Demo@1234`.
 
 ### Running the tests
 ```bash
-cd backend
-python -m unittest test_longitudinal_engine test_visit_patterns
+cd backend && python -m unittest          # engine, endpoints, LLM and PDF tests
+cd frontend && npm run build
+cd frontend && npm run test:e2e           # Playwright, fully mocked
 ```
 
 ---
@@ -158,7 +162,9 @@ python -m unittest test_longitudinal_engine test_visit_patterns
 
 - **Gemini free tier:** Google may use what is sent to improve its products, so use demo data only. Real patient data needs a paid key.
 - **ECG model:** the teammate's reported metrics are on 603 PTB-XL records: accuracy 89%, sensitivity 79%, specificity 95%, AUC 0.96. They have not been independently reproduced or validated on Indian patients. Recordings that fail the signal quality checks get no classification.
-- **Trend screening and PCE** are deterministic rules. The review priority is a screening flag, never a probability or a diagnosis.
+- **Trend screening** is a set of deterministic rules. The review priority is a screening flag, never a probability or a diagnosis.
+- **Risk equations** (PREVENT 2023, PCE 2013) are population estimates from US cohorts, run only on clinician-confirmed inputs. They are not individual prognoses and are not calibrated for Indian populations.
+- **Migrations v12–v16 must be applied by hand** in the Supabase SQL editor, in order. Features whose migration is not live hide themselves.
 - **Secrets:** `.env` files are git-ignored. Never commit API keys.
 
 ## Documentation

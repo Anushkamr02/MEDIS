@@ -36,6 +36,10 @@ another.
 | 8 | Done (not yet committed) | `supabase_migration_v14.sql` (drops the patient policy on `cad_assessments` and the v6 share notification; `patient_health_summaries`; `publish_health_summary()`, `withdraw_health_summary()`; access history lists publish/withdraw), `PublishSummary.jsx` (replaces `ShareAssessment.jsx`), `HealthSummary.jsx` (replaces `HeartHealthCheck.jsx`), `lib/healthSummary.js`; patient history PDF prints the published summary; `/ai/summary` marks drafts with untraceable numbers `publishable: false` and stores the draft once v14 is live; `test_history_pdf.py` (3 tests), `tests/health-summary.spec.js` (3 tests). A review is required only when the assessment has a significant finding (Q5 rule, mirrored in SQL). Publishing a new version withdraws the previous one. Ask MEDIS still reads shared assessments until step 11, which returns no rows once v14 is applied. The demo seed has no assessments, so it needs no change. |
 | 9 | Done (not yet committed) | `supabase_migration_v15.sql` (`escalation_events`, `escalate_finding()`, insert triggers for the immediate step, hourly `medis_escalate_urgent`, time limits in `medis_escalation_after()`, 7-day look-back so applying it doesn't alert on old findings); `lib/escalation.js`, `useEscalations`; red "Overdue urgent reviews" block pinned at the top of the Overview; escalation history on the Monitoring card; `tests/escalation.spec.js` (3 tests). Only the latest check / latest ECG per patient escalates, and only the highest new level notifies. Escalation audit rows have no actor, so v15 makes `audit_logs.user_id` nullable. |
 | 10 | Done (not yet committed) | `viewed_clinical_insights` audited from `ClinicalInsights.jsx` (once per patient per 10 min; whitelist and access-history label in v15). Reviews, publish/withdraw and escalation already audit inside their RPCs/triggers. The patient dashboard no longer queries `ecg_analyses` (RLS returned nothing, but the UI was built to show classifications). `tests/governance.spec.js` (6 tests) and `supabase/governance_check.sql` (RLS checks as the demo accounts, rolled back). No-family/caregiver policy in CLAUDE.md and INTEGRATION_PLAN §11. |
+| 11 | Done (not yet committed) | `supabase_migration_v16.sql` (`chat_messages.feedback`/`feedback_at`, `rate_chat_message()`); the chat context now reads the **published summary** (v14) and no longer touches `cad_assessments`; source entries carry the anchor of the record they cite (`llm.py chat_context`), `lib/chatSources.js` + `useRevealHash()` in `PatientLayout`, 👍/👎 in `PatientChat.jsx` (hidden without v16), anchors on the dashboard profile card, medications and health summary; `tests/chatbot.spec.js` (3 tests) and the updated `test_patient_chat.py` (10 tests). Chips point at existing DOM ids (`visit-<visit_id>`, `rx-<id>`), so no page layout changed. |
+| 12 | Done (not yet committed) | Patient-ID search in the doctor top bar (`DoctorLayout.jsx`), which navigates to `/doctor/patients?q=…`; `MyPatients.jsx` also accepts `?id=`; per-hospital marker shapes and a key in `TrendChart.jsx`; `tests/doctor-ux.spec.js` (3 tests). `PatientSearch.jsx` stays a redirect — My Patients owns the lookup, so the search box reuses it instead of a second implementation. |
+| 13 | Done (not yet committed) | `medis/ai/prevent.py` (2023 PREVENT base model, 10-year total CVD / ASCVD / heart failure), `test_prevent.py` (11 tests against the published worked examples), `POST /ai/risk/{assessment_id}` storing PREVENT under `pce.prevent` with who confirmed the inputs, `test_risk_endpoint.py` (6 tests), `ai/RiskForm.jsx` + `ai/RiskCard.jsx` on the Patient Profile, `tests/risk.spec.js` (4 tests). The entry point question from step 1 is answered: the card sits inside Clinical Insights, so both equations are doctor-only. `PceForm.jsx` was replaced by `RiskForm.jsx`, and the `redesign.spec.js` fixme for the old card now points at `risk.spec.js`. BMI may be left blank: heart failure is then reported as unavailable rather than guessed. |
+| 14 | Done (not yet committed) | CLAUDE.md (architecture, layout, v16, risk conventions, Known state), README (patient/doctor features, risk row, test commands, limitations), `docs/UI_FEATURES_SPEC.md` (§2.10 chatbot, §3.10(3) hospital markers, §3.10(6) risk card), `docs/DASHBOARD_PANELS.md` (panels added since), `docs/INTEGRATION_PLAN.md` (PREVENT beside the PCE), and `IMPROVEMENT_PLAN.md` marked implemented. |
 
 **Found during step 1: features that earlier commits removed**
 
@@ -44,7 +48,7 @@ it back, or delete its test.
 
 | Removed feature | Removed in | Note |
 |---|---|---|
-| **ASCVD/PCE risk card** | `01ba245` ("Remove ASCVD risk card") | `PceForm.jsx` still exists but no page renders it. **Step 13 (PREVENT) needs an entry point to be agreed.** |
+| **ASCVD/PCE risk card** | `01ba245` ("Remove ASCVD risk card") | **Resolved in step 13:** `ai/RiskCard.jsx` renders inside Clinical Insights on the Patient Profile, with PREVENT (2023) as the default and the 2013 PCE behind "Compare". `PceForm.jsx` became `RiskForm.jsx`. |
 | Chart "View measurement data" table and focusable chart points | `0145977` | Accessibility |
 | Sticky header and tab bar | `0145977` | |
 | Clicking a notification jumps to its section | `0145977` | Clicking now only marks it read. |
@@ -433,7 +437,7 @@ Apply them in the Supabase SQL editor, in order. Each one only after its step is
 | v13 | 6 |
 | v14 | 8 |
 | v15 | 9 |
-| v16 | 11 |
+| v16 | 11 (`supabase/supabase_migration_v16.sql`) |
 
 After v14, run `demo_seed.sql` again so the demo has published summaries instead of the old
 shared assessments.

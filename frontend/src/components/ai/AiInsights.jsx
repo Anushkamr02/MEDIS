@@ -11,6 +11,7 @@ import AiSummary from './AiSummary';
 import DigitalEcgUpload from './DigitalEcgUpload';
 import PublishSummary from './PublishSummary';
 import FindingReview from './FindingReview';
+import RiskCard from './RiskCard';
 import { assessmentFindings } from '../../lib/findingReview';
 
 function Flags({ flags, chip }) {
@@ -244,6 +245,15 @@ export default function AiInsights({ patientId, consultationId, getDraftValues, 
                   <h3 className="mb-2 text-sm font-semibold">Trends</h3>
                   <TrendCharts trajectories={trajectories} compact={compact} />
                 </div>
+                {!compact && !assessment.preview && assessment.id && (
+                  <RiskCard
+                    key={assessment.id}
+                    assessment={assessment}
+                    trajectories={trajectories}
+                    patientId={patientId}
+                    onSaved={(saved) => setAssessment((prev) => ({ ...prev, ...saved }))}
+                  />
+                )}
                 <div id="ai-review" ref={reviewRef} tabIndex={-1} className="scroll-mt-24 rounded-lg focus-visible:outline-2 focus-visible:outline-ring">
                   <p className="mb-2 text-sm text-muted-foreground">
                     {report.overall_assessment || 'Review the recorded findings and their evidence below.'}

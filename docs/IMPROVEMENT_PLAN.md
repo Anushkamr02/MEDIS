@@ -1,7 +1,10 @@
 # MEDIS improvement plan: continuous monitoring with doctor-reviewed AI
 
-> **Status: proposal for team review. Nothing below has been built yet.**
-> Please read it and add your comments, especially on the questions in §10.
+> **Status: implemented.** All 14 steps of
+> [IMPLEMENTATION_STEPS.md](IMPLEMENTATION_STEPS.md) are built and tested; this document is
+> kept as the rationale behind them. Where a question in §10 was still open, the step used the
+> default stated here (see each step's note in IMPLEMENTATION_STEPS.md).
+> **Migrations v12–v16 must be applied by hand in the Supabase SQL editor, in order.**
 
 ## 1. Why we are proposing this
 

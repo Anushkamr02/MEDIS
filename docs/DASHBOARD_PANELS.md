@@ -5,6 +5,21 @@ and turns the patient dashboard into five navigable sections. It extends the
 existing React/Vite app, Supabase schema and FastAPI service; it does not add
 a second store and does not replace any existing screen.
 
+## Panels added since this document
+
+The monitoring and governance work (docs/IMPLEMENTATION_STEPS.md) added panels that are
+specified there and in `docs/UI_FEATURES_SPEC.md` rather than here:
+
+- **Doctor Overview:** the monitoring board (trend tiles, Needs review, Improving, Follow-ups
+  due) and the red "Overdue urgent reviews" block pinned above it.
+- **Patient Profile:** the "Clinical Insights: doctor only" group, the Monitoring card with its
+  escalation history, the finding review dialog, **Publish summary to patient**, and the
+  **10-year risk** card (2023 PREVENT + legacy 2013 PCE).
+- **Patient dashboard:** "Health summary from your doctor" replaces the heart health check, and
+  Ask MEDIS replies carry 👍/👎 and clickable source chips.
+
+Each panel hides itself when its migration (v12–v16) is not applied.
+
 ## Required database migration
 
 Apply `supabase/supabase_migration_v8.sql` after v7 using the project's

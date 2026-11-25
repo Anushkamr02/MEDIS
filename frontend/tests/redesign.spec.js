@@ -87,7 +87,10 @@ test('old search links redirect with query and preserve logged record access', a
 test('merged patient panel has one search and filters existing patients by name or ID', async ({ page }) => {
   const state = await mockApp(page);
   await page.goto('/doctor/patients');
-  await expect(page.getByRole('textbox')).toHaveCount(1);
+  // One search on the page itself; the global ID box in the top bar (step 12)
+  // sits outside <main> and navigates here with ?q=.
+  await expect(page.getByRole('main').getByRole('textbox')).toHaveCount(1);
+  await expect(page.getByRole('banner').getByLabel('Find a patient by MEDIS Patient ID')).toBeVisible();
   await expect(page.locator('nav').getByRole('link', { name: 'Search Patient', exact: true })).toHaveCount(0);
   const input = page.getByRole('textbox', { name: 'Patient ID', exact: true });
   const table = page.getByRole('table');
@@ -206,27 +209,8 @@ test('draft deletion confirms, retains failed rows, and updates count only after
   expect(state.requests.some((r) => r.name === 'consultations' && r.method === 'DELETE')).toBe(false);
 });
 
-// The ASCVD risk card (PceForm) was removed from AI Insights in 01ba245 and is
-// not rendered anywhere; re-enable when a PCE/PREVENT entry point returns.
-test.fixme('PCE requires explicit choices and does not calculate for known ASCVD', async ({ page }) => {
-  const state = await mockApp(page);
-  await page.goto(`/doctor/patients/${PATIENT}`);
-  await page.getByRole('button', { name: 'Calculate', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('button', { name: 'Calculate', exact: true })).toBeDisabled();
-  await dialog.getByRole('button', { name: 'Male', exact: true }).click();
-  await dialog.getByRole('button', { name: 'White', exact: true }).click();
-  await dialog.getByLabel('Total cholesterol (mg/dL)', { exact: true }).fill('200');
-  await dialog.getByLabel('HDL (mg/dL)', { exact: true }).fill('50');
-  await dialog.getByLabel('Systolic BP (mmHg)', { exact: true }).fill('130');
-  for (const legend of ['On BP treatment?', 'Diabetes?', 'Current smoker?']) await dialog.locator('fieldset').filter({ has: page.locator('legend', { hasText: legend }) }).getByRole('button', { name: 'No', exact: true }).click();
-  await dialog.locator('fieldset').filter({ has: page.locator('legend', { hasText: 'Known heart disease or stroke' }) }).getByRole('button', { name: 'Yes', exact: true }).click();
-  await dialog.getByLabel('Values measured on').fill(new Date().toISOString().slice(0, 10));
-  await dialog.getByRole('button', { name: 'Calculate', exact: true }).click();
-  await expect(page.getByText('Not applicable: patient has known ASCVD.', { exact: true })).toBeVisible();
-  const request = state.requests.find((r) => r.name.includes('/longitudinal/') && r.body?.pce_inputs);
-  expect(request.body.pce_inputs.known_ascvd).toBe(true);
-});
+// The 10-year risk card is back (implementation step 13) with PREVENT and the
+// legacy 2013 PCE. Its coverage lives in tests/risk.spec.js.
 
 // Clicking a notification marks it read. Jumping to the related section
 // (#appointments) was removed in 0145977, so that is no longer asserted.

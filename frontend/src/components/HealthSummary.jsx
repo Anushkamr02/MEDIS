@@ -56,7 +56,7 @@ export default function HealthSummary({ patientId }) {
   const selected = keys.includes(metric) ? metric : keys[0];
 
   return (
-    <div className="rounded-lg border bg-card p-3" aria-label="Health summary from your doctor" role="region">
+    <div id="health-summary" className="scroll-mt-24 rounded-lg border bg-card p-3" aria-label="Health summary from your doctor" role="region">
       <h3 className="text-sm font-semibold">Health summary from your doctor</h3>
       <p className="mt-0.5 text-xs text-muted-foreground">
         Written by {summary.doctor?.full_name ? `Dr. ${summary.doctor.full_name}` : 'your doctor'} on {formatDate(summary.published_at)}

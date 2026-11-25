@@ -30,6 +30,46 @@ const GROUPS = [
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)'];
 
+// A reading's shape says which hospital recorded it, so a doctor can see at a
+// glance that a series mixes sources. The colour still belongs to the metric.
+const MARKERS = ['circle', 'square', 'diamond', 'triangle', 'cross'];
+const MARKER_LABEL = { circle: 'circle', square: 'square', diamond: 'diamond', triangle: 'triangle', cross: 'cross' };
+
+/** One marker, drawn around (cx, cy). Used for both the chart and its legend. */
+function Marker({ shape, cx, cy, r = 4, stroke, fill, strokeWidth = 2 }) {
+  const common = { stroke, fill, strokeWidth };
+  if (shape === 'square') return <rect x={cx - r} y={cy - r} width={r * 2} height={r * 2} {...common} />;
+  if (shape === 'diamond') return <polygon points={`${cx},${cy - r - 1} ${cx + r + 1},${cy} ${cx},${cy + r + 1} ${cx - r - 1},${cy}`} {...common} />;
+  if (shape === 'triangle') return <polygon points={`${cx},${cy - r - 1} ${cx + r + 1},${cy + r} ${cx - r - 1},${cy + r}`} {...common} />;
+  if (shape === 'cross') {
+    return (
+      <g stroke={stroke} strokeWidth={strokeWidth}>
+        <line x1={cx - r} y1={cy - r} x2={cx + r} y2={cy + r} />
+        <line x1={cx - r} y1={cy + r} x2={cx + r} y2={cy - r} />
+      </g>
+    );
+  }
+  return <circle cx={cx} cy={cy} r={r} {...common} />;
+}
+
+/** Legend row: which shape stands for which hospital. */
+function HospitalLegend({ shapes }) {
+  const names = [...shapes.keys()];
+  if (names.length < 2) return null; // one source needs no key
+  return (
+    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-label="Hospital markers">
+      {names.map((name) => (
+        <span key={name} className="inline-flex items-center gap-1">
+          <svg width="14" height="14" aria-hidden>
+            <Marker shape={shapes.get(name)} cx={7} cy={7} r={4} stroke="var(--muted-foreground)" fill="var(--card)" />
+          </svg>
+          {name} ({MARKER_LABEL[shapes.get(name)]})
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function signed(n, digits = 1) {
   const v = Math.round(n * 10 ** digits) / 10 ** digits;
   return `${v > 0 ? '+' : ''}${v}`;
@@ -86,6 +126,11 @@ function Chart({ trajectories, keys, height = 220, showHeaders = true }) {
   const data = [...merged.values()].sort((a, b) => a.t - b.t);
   const ref = METRIC_INFO[keys[0]]?.ref;
   const hasAny = all.some((x) => x.series?.count > 0);
+  // Stable order: the hospital of the earliest reading gets the first shape.
+  const shapes = new Map();
+  data.forEach((row) => {
+    if (row.hospital && !shapes.has(row.hospital)) shapes.set(row.hospital, MARKERS[shapes.size % MARKERS.length]);
+  });
   return (
     <div className="space-y-1">
       {showHeaders && all.map(({ k, series }) => <TrendHeader key={k} metricKey={k} series={series} />)}
@@ -134,7 +179,20 @@ function Chart({ trajectories, keys, height = 220, showHeaders = true }) {
                   connectNulls
                   stroke={COLORS[i]}
                   strokeWidth={2}
-                  dot={{ r: 4, fill: 'var(--card)', strokeWidth: 2 }}
+                  dot={(props) => {
+                    const { cx, cy, payload, index } = props;
+                    if (cx === null || cy === null || payload?.[k] === undefined || payload?.[k] === null) return null;
+                    return (
+                      <Marker
+                        key={`${k}-${index}`}
+                        shape={shapes.get(payload.hospital) ?? 'circle'}
+                        cx={cx}
+                        cy={cy}
+                        stroke={COLORS[i]}
+                        fill="var(--card)"
+                      />
+                    );
+                  }}
                   activeDot={{ r: 6 }}
                   isAnimationActive={false}
                 />
@@ -157,6 +215,7 @@ function Chart({ trajectories, keys, height = 220, showHeaders = true }) {
           </span>
         </div>
       )}
+      {hasAny && showHeaders && <HospitalLegend shapes={shapes} />}
     </div>
   );
 }
