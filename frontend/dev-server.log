@@ -1,0 +1,43 @@
+
+  VITE v8.3.5  ready in 1848 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+10:22:53 am [vite] .env changed, restarting server...
+10:22:53 am [vite] server restarted.
+7:08:10 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/AiInsights.jsx
+7:08:31 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/DocumentAiActions.jsx
+7:09:48 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/AiInsights.jsx
+7:09:48 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/DocumentAiActions.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/HeartHealthCheck.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/ShareAssessment.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/AiInsights.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/pages/doctor/DoctorAppointments.jsx, /src/pages/doctor/DoctorOverview.jsx, /src/pages/doctor/MyPatients.jsx, /src/pages/doctor/NewConsultation.jsx, /src/pages/doctor/PatientProfile.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/AccessHistory.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/PrescriptionForm.jsx
+7:12:11 pm [vite] (client) hmr update /src/pages/PatientDashboard.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/AiSummary.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/EcgAnalysis.jsx
+7:12:11 pm [vite] (client) hmr update /src/pages/doctor/DoctorAppointments.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/components/medis.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/pages/PatientLayout.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/AccessEventsPanel.jsx, /src/components/VisitDetails.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/pages/doctor/DoctorAppointments.jsx, /src/pages/doctor/DoctorOverview.jsx, /src/pages/doctor/MyPatients.jsx, /src/pages/doctor/PatientProfile.jsx, /src/components/PatientAppointments.jsx, /src/components/DocumentUpload.jsx, /src/components/MedicalDocumentsPanel.jsx, /src/components/ai/EcgAnalysis.jsx, /src/components/VisitDetails.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/AccessHistory.jsx
+7:12:11 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/PrescriptionForm.jsx
+7:12:11 pm [vite] (client) hmr update /src/pages/patient/PatientAccess.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/pages/doctor/DoctorOverview.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/pages/doctor/MyPatients.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/pages/doctor/NewConsultation.jsx, /src/styles/theme.css
+7:12:11 pm [vite] (client) hmr update /src/pages/doctor/PatientProfile.jsx, /src/styles/theme.css
+7:16:53 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/DocumentAiActions.jsx
+7:18:38 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/DocumentAiActions.jsx
+7:23:02 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/PatientChat.jsx
+7:23:02 pm [vite] (client) hmr update /src/pages/PatientLayout.jsx, /src/styles/theme.css
+7:23:02 pm [vite] (client) hmr update /src/pages/PatientDashboard.jsx, /src/styles/theme.css
+7:23:12 pm [vite] (client) hmr update /src/pages/PatientLayout.jsx, /src/styles/theme.css
+7:23:20 pm [vite] (client) hmr update /src/styles/theme.css
+7:26:41 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/TrendChart.jsx
+7:26:41 pm [vite] (client) hmr update /src/pages/doctor/DoctorLayout.jsx, /src/styles/theme.css
+7:26:41 pm [vite] (client) hmr update /src/pages/doctor/MyPatients.jsx, /src/styles/theme.css
+7:34:02 pm [vite] (client) hmr update /src/styles/theme.css, /src/components/ai/AiInsights.jsx
+7:34:02 pm [vite] (client) hmr update /src/styles/theme.css
